@@ -123,3 +123,18 @@ def test_text_encoder_uses_gpu_when_available(monkeypatch):
     assert F._text_device() == "cuda"
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert F._text_device() == "cpu"
+
+
+def test_cached_bag_needs_no_acoustic_extractor(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import numpy as np
+    from TRAMIL import features as F
+
+    np.save(tmp_path / "301_X.npy", np.ones((2, 88), dtype=np.float32))
+    np.save(tmp_path / "301_E.npy", np.ones((2, 768), dtype=np.float32))
+    monkeypatch.setattr(F, "_ws", None)
+    monkeypatch.setitem(sys.modules, "opensmile", None)  # import opensmile now raises
+    X, E = F.bag_features(SimpleNamespace(subject=301, wavs=[], texts=[]), tmp_path)
+    assert X.shape == (2, 88) and E.shape == (2, 768)

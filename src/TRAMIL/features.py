@@ -123,6 +123,7 @@ def _acoustic_bag(bag, cache_dir, smile):
     path = Path(cache_dir) / f"{bag.subject}_X.npy"
     if path.exists():
         return np.load(path)
+    smile = smile or _worker_smile()  # built only on a cache miss: a cached bag needs no opensmile
     xs = [read_wav(w) for w in bag.wavs]
     g = session_gain(xs)
     X = np.stack([acoustic_vector(x, SR, g, smile) for x in xs])
@@ -161,7 +162,7 @@ def extract_all(bags, cache_dir, workers=1):
 
 def bag_features(bag, cache_dir, smile=None):
     """(X_b, E_b) for one bag, cached per subject under cache_dir (resumable); non-finite instances dropped."""
-    X = _acoustic_bag(bag, cache_dir, smile or _worker_smile())
+    X = _acoustic_bag(bag, cache_dir, smile)
     path = Path(cache_dir) / f"{bag.subject}_E.npy"
     if not path.exists():
         np.save(path, embed_texts(bag.texts))
