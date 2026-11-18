@@ -91,5 +91,15 @@ Route: all tasks delegated (writer trigger); worker = general agent standing in 
   (real mpnet) wrote `clone/TRAMIL/Data/features/*` and a valid `shard.json`. Expected 1-3 h on 4 Kaggle CPU cores, < 12 h limit,
   no carry path (per-subject cache is resumable only within a session).
 
+- T8 run (2026-11-18): fixes `881765e` (audio inside Kaggle-unpacked `instances_audio/instances_audio/`, RED observed),
+  `cc9fa33` (mpnet on CUDA when available, RED observed), `6a26031` (`__levels__ = ["pilot", "full"]`). Smoke passed on a
+  Tesla T4 at `6a26031` (107 instances, 2 sessions). Launch chain: position (`TRAMIL/AGREED.md`) -> PoC diagram validated
+  by the operator in chat (audit override for a 5.9 pt right margin) -> propose -> offer -> gate -> submit. Gotcha: offer/gate
+  run on Windows record `tools\kaggle\...`; the WSL submit needs them recorded under WSL. Campaign: 2470 s on T4,
+  184/184 sessions, 10476 instances, X 88-d / E 768-d, 6 non-finite acoustic rows (one each in 306, 327, 338, 362, 421, 459;
+  dropped by `bag_features`). Fetched clone sources match `6a26031`. Cache published as private Kaggle dataset
+  `alejopatio/tramil-edaic-features` (status ready, anonymous API 403).
+
 ## Next step
-Orchestrator: smoke submit, then full run of `extract-features`, publish the fetched cache as a second private dataset.
+Full-scale E1 on all 141 train bags reading `alejopatio/tramil-edaic-features`; timing probe `Results/timing.json`;
+operator decision on the four T2 deviations.
