@@ -46,6 +46,19 @@ def predict(m, items):
         return np.array([torch.sigmoid(m(X, R)).item() for X, R, _ in items])
 
 
+def run_epoch(m, opt, items, w, gen, wrap=iter):
+    """One pass over the shuffled bags in mini-batches of BATCH; `wrap` sees the batch iterator (timing probe)."""
+    m.train()
+    order = torch.randperm(len(items), generator=gen).tolist()
+    batches = ([items[j] for j in order[i : i + BATCH]] for i in range(0, len(order), BATCH))
+    for batch in wrap(batches):
+        eta = torch.stack([m(X, R) for X, R, _ in batch])
+        loss = weighted_bce(eta, torch.tensor([y for *_, y in batch]), w)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+
+
 def train(make_model, items, epochs, seed, eval_items=None):
     """Re-initialise with seed and train; returns (model, per-epoch AUROC on eval_items or [])."""
     torch.manual_seed(seed)
@@ -55,15 +68,7 @@ def train(make_model, items, epochs, seed, eval_items=None):
     gen = torch.Generator().manual_seed(seed)
     curve = []
     for _ in range(epochs):
-        m.train()
-        order = torch.randperm(len(items), generator=gen).tolist()
-        for i in range(0, len(order), BATCH):
-            batch = [items[j] for j in order[i : i + BATCH]]
-            eta = torch.stack([m(X, R) for X, R, _ in batch])
-            loss = weighted_bce(eta, torch.tensor([y for *_, y in batch]), w)
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+        run_epoch(m, opt, items, w, gen)
         if eval_items is not None:
             curve.append(roc_auc_score([y for *_, y in eval_items], predict(m, eval_items)))
     return m, curve
