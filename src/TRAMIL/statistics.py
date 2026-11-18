@@ -4,9 +4,8 @@ import numpy as np
 from scipy import stats as sps
 
 __provenance__ = {
-    "revision": "experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v04.md",
-    "sections": ["E1"],
-    "experiments": ["E1"],
+    "revision": "research-concept-residual-semantic-prior-bipartite-mil-r06.md",
+    "sections": ["18.1"],
     "equations": [62, 63, 69],
     "invariants": [
         "fisher_ratio_is_squared_mean_gap_over_summed_variances",

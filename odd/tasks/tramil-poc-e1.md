@@ -40,7 +40,7 @@ pipeline end to end before spending Kaggle quota on the 900-run protocol.
 - [x] T5 Statistics: Fisher ratio (62), corrected resampled t (63), TOST equivalence (69), Holm. Route: delegated.
 - [x] T6 `exp_e1` rehearsal: 141 train bags, 1 repetition x 2 folds x seed 11, few epochs; residual,
       learned-only, ABMIL, Gated ABMIL, SVM; report table to `TRAMIL/Results/`. Route: delegated.
-- [ ] T7 Engine checks: `verify --revision <v04>`, then `agree`. Route: inline.
+- [x] T7 Engine checks: `verify --revision <v04>`, then `agree`. Route: inline.
 
 ## Acceptance
 - Suite green under the target interpreter; `verify` fidelity clean; `agree` passes without acknowledgements.
@@ -67,5 +67,14 @@ Route: all tasks delegated (writer trigger); worker = general agent standing in 
   318, 341, 362 are training bags, 321 is a dev bag; no re-shifting applied here. Audio is the project's cleaned audio
   (hum removal + 50 Hz high-pass) rather than the raw audio of Ec. 68 (deviation, reported).
 
+- T7 (inline): `verify` fidelity ok for both documents (experiments v04, proposal r06) after rebinding
+  `statistics.py` to r06 section 18.1 (Ec. 62, 63, 69); it had declared equations under the experiments
+  revision, which drifted the proposal lineage. `agree` status `agreed` (54 crossed, 15 out of scope, untested
+  empty) with `--acknowledge absent:N`: v04 line 54 quotes the literal `[claims:N]` in prose. Suite 51 passed
+  with data env vars, 48 passed + 3 skipped without. Test fixtures now read TRAMIL_LABELS / TRAMIL_EDAIC
+  (defaults under gitignored TRAMIL/Data/) instead of machine paths, since the repo is public.
+  Still reported by verify: scaffold gaps (kit files: test_smoke, findings, audit, verification notebook) and
+  stray-module listing; audit `none`.
+
 ## Next step
-T7 (inline, orchestrator): `verify --revision <v04>` then `agree`. Open items for the operator: see build report.
+Full feature extraction (all sessions), private Kaggle dataset of the cache, job generation, smoke rehearsal.
