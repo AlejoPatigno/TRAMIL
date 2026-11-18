@@ -1,0 +1,161 @@
+"""Frozen feature extraction: eGeMAPSv02 split 7 + 81 (Ec. 5, 6, 68) and all-mpnet-base-v2 embeddings (Ec. 7, 8)."""
+import wave
+from pathlib import Path
+
+import numpy as np
+
+__provenance__ = {
+    "revision": "research-concept-residual-semantic-prior-bipartite-mil-r06.md",
+    "sections": ["4.1", "4.2", "18.9"],
+    "equations": [5, 6, 7, 8, 68],
+    "invariants": [
+        "egemaps_split_is_7_pause_dependent_plus_81_rest",
+        "acoustic_vector_is_88_finite_and_temporal_first",
+        "temporal_block_sees_the_full_answer_and_rest_sees_silence_removed",
+        "remove_silence_drops_exact_zero_runs_and_keeps_speech",
+        "session_gain_hits_target_level_without_clipping",
+        "text_embeddings_are_unit_norm_768",
+        "bag_cache_is_resumable",
+    ],
+}
+
+SR = 16000
+TEXT_MODEL = "sentence-transformers/all-mpnet-base-v2"
+# The six temporal descriptors of eGeMAPSv02 plus the equivalent sound level (Section 18.9).
+TEMPORAL = (
+    "loudnessPeaksPerSec",
+    "VoicedSegmentsPerSec",
+    "MeanVoicedSegmentLengthSec",
+    "StddevVoicedSegmentLengthSec",
+    "MeanUnvoicedSegmentLength",
+    "StddevUnvoicedSegmentLength",
+    "equivalentSoundLevel_dBp",
+)
+TARGET_DB = -26.0  # session active-speech RMS target in dBFS; the proposal says only "a fixed target" (choice, reported)
+FRAME_S = 0.025
+SILENCE_REL_DB = 35.0  # frames this far below the response's loud frames are non-speech
+DESCRIPTORS = (  # Section 4.2 table, fixed order
+    "Little interest or pleasure in doing things",
+    "Feeling down, depressed, irritable or hopeless",
+    "Trouble falling or staying asleep, or sleeping too much",
+    "Feeling tired or having little energy",
+    "Poor appetite or overeating",
+    "Feeling bad about yourself – or that you are a failure or have let yourself or your family down",
+    "Trouble concentrating on things, such as school work, reading or watching television",
+    "Moving or speaking so slowly that other people could have noticed? Or the opposite – being so fidgety or restless "
+    "that you have been moving around a lot more than usual",
+)
+
+
+def make_smile():
+    import opensmile
+
+    return opensmile.Smile(
+        feature_set=opensmile.FeatureSet.eGeMAPSv02, feature_level=opensmile.FeatureLevel.Functionals
+    )
+
+
+def split_indices(names):
+    tmp = [names.index(n) for n in TEMPORAL]
+    rest = [i for i in range(len(names)) if i not in tmp]
+    return tmp, rest
+
+
+def read_wav(path):
+    with wave.open(str(path)) as w:
+        assert w.getframerate() == SR and w.getnchannels() == 1
+        return np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+
+
+def remove_silence(x, sr=SR):
+    """S: drop exact-zero runs (scrubbed spans) and frames far below the response's loud frames."""
+    n = int(FRAME_S * sr)
+    k = len(x) // n
+    if k == 0:
+        return x
+    fr = x[: k * n].reshape(k, n)
+    rms = np.sqrt((fr**2).mean(1))
+    db = 20 * np.log10(np.maximum(rms, 1e-10))
+    keep = (rms > 0) & (db >= np.percentile(db, 90) - SILENCE_REL_DB)
+    out = fr[keep].reshape(-1)
+    return np.concatenate([out, x[k * n :]]) if keep[-1] else out
+
+
+def session_gain(responses, sr=SR, target_db=TARGET_DB):
+    """g_b: brings the active-speech RMS of the session's answers to target_db, limited so no sample clips."""
+    voiced = np.concatenate([remove_silence(r, sr) for r in responses])
+    rms = np.sqrt(np.mean(voiced**2))
+    g = 10 ** (target_db / 20) / max(rms, 1e-10)
+    peak = max(float(np.abs(r).max()) for r in responses)
+    return min(g, 1.0 / max(peak, 1e-10))
+
+
+def acoustic_vector(x, sr, gain, smile):
+    """Ec. 68: [phi_temp(g a) ; phi_rest(S(g a))] in R^88."""
+    tmp, rest = split_indices(list(smile.feature_names))
+    gx = (gain * x).astype(np.float32)
+    full = smile.process_signal(gx, sr).iloc[0].to_numpy()
+    cut = smile.process_signal(remove_silence(gx, sr), sr).iloc[0].to_numpy()
+    return np.concatenate([full[tmp], cut[rest]]).astype(np.float32)
+
+
+_model = None
+
+
+def embed_texts(texts, batch_size=32):
+    """phi_t (Ec. 7, 8): frozen all-mpnet-base-v2, 768-d, unit Euclidean norm."""
+    global _model
+    if _model is None:
+        from sentence_transformers import SentenceTransformer
+
+        _model = SentenceTransformer(TEXT_MODEL, device="cpu")
+    return _model.encode(list(texts), batch_size=batch_size, normalize_embeddings=True).astype(np.float32)
+
+
+def _acoustic_bag(bag, cache_dir, smile):
+    path = Path(cache_dir) / f"{bag.subject}_X.npy"
+    if path.exists():
+        return np.load(path)
+    xs = [read_wav(w) for w in bag.wavs]
+    g = session_gain(xs)
+    X = np.stack([acoustic_vector(x, SR, g, smile) for x in xs])
+    Path(cache_dir).mkdir(parents=True, exist_ok=True)
+    np.save(path, X)
+    return X
+
+
+def _acoustic_worker(args):
+    bag, cache_dir = args
+    _acoustic_bag(bag, cache_dir, _worker_smile())
+    return bag.subject
+
+
+_ws = None
+
+
+def _worker_smile():
+    global _ws
+    if _ws is None:
+        _ws = make_smile()
+    return _ws
+
+
+def extract_all(bags, cache_dir, workers=1):
+    """Resumable: acoustic X_b per subject (process pool) then text E_b per subject; cached under cache_dir."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    todo = [b for b in bags if not (Path(cache_dir) / f"{b.subject}_X.npy").exists()]
+    if todo and workers > 1:
+        with ProcessPoolExecutor(workers) as ex:
+            list(ex.map(_acoustic_worker, [(b, cache_dir) for b in todo]))
+    for b in bags:
+        bag_features(b, cache_dir)
+
+
+def bag_features(bag, cache_dir, smile=None):
+    """(X_b, E_b) for one bag, cached per subject under cache_dir (resumable)."""
+    X = _acoustic_bag(bag, cache_dir, smile or _worker_smile())
+    path = Path(cache_dir) / f"{bag.subject}_E.npy"
+    if not path.exists():
+        np.save(path, embed_texts(bag.texts))
+    return X, np.load(path)
