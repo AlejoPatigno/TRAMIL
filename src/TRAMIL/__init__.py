@@ -14,6 +14,9 @@ __implementation__ = {
 }
 __backend__ = "torch"
 
+# Ordered rung ladder for the position sequence: rehearsal-scale pilot, then the declared full scale.
+__levels__ = ["pilot", "full"]
+
 __steps__ = {
     "extract-features": {
         "module": "TRAMIL.extract_run",
