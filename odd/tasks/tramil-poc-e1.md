@@ -41,6 +41,9 @@ pipeline end to end before spending Kaggle quota on the 900-run protocol.
 - [x] T6 `exp_e1` rehearsal: 141 train bags, 1 repetition x 2 folds x seed 11, few epochs; residual,
       learned-only, ABMIL, Gated ABMIL, SVM; report table to `TRAMIL/Results/`. Route: delegated.
 - [x] T7 Engine checks: `verify --revision <v04>`, then `agree`. Route: inline.
+- [x] T8 Kaggle feature extraction job: `TRAMIL.extract_run.run` (train+dev sessions, folder or zip input, `limit` for smoke),
+      `__steps__["extract-features"]` (remote, kaggle), generated job `tools/kaggle/extract-features`. Route: inline
+      (one new module + test; writer trigger not fired).
 
 ## Acceptance
 - Suite green under the target interpreter; `verify` fidelity clean; `agree` passes without acknowledgements.
@@ -76,5 +79,17 @@ Route: all tasks delegated (writer trigger); worker = general agent standing in 
   Still reported by verify: scaffold gaps (kit files: test_smoke, findings, audit, verification notebook) and
   stray-module listing; audit `none`.
 
+- T8 `a8faff0`, `2be408d`, job `a0acc6f`: RED = ImportError (`cannot import name 'extract_run'`); GREEN 7 passed (zip and folder
+  inputs, train+dev coverage, limit, mount-nested root, stamp under runner only); full suite 55 passed, 3 skipped. Job generated
+  under WSL (Windows child env cannot resolve DNS for the git probe): cpu accelerator (opensmile is CPU-bound, mpnet on ~10k
+  short texts is minutes on CPU; GPU quota saved), input dataset `alejopatio/tramil-edaic-instances`, pip: opensmile,
+  sentence-transformers. First attempt refused on an unresolved read (source digest in the stamp); fixed by dropping the digest
+  (commit identifies the code), not by waiving. Preflight under WSL: pin, diagrams, code-reachability, inputs, accelerator pass;
+  `interpreter` fails only because WSL python lacks kagglesdk (passes under the Windows workspace interpreter);
+  warns: account needs its own smoke, session-fit unmeasured. Windows local-rehearsal fails for environment reasons (restricted
+  child env breaks opensmile DLL and process pool); equivalent manual rehearsal with FORGE_RUN_MODE=smoke on a synthetic input
+  (real mpnet) wrote `clone/TRAMIL/Data/features/*` and a valid `shard.json`. Expected 1-3 h on 4 Kaggle CPU cores, < 12 h limit,
+  no carry path (per-subject cache is resumable only within a session).
+
 ## Next step
-Full feature extraction (all sessions), private Kaggle dataset of the cache, job generation, smoke rehearsal.
+Orchestrator: smoke submit, then full run of `extract-features`, publish the fetched cache as a second private dataset.
