@@ -100,6 +100,9 @@ Route: all tasks delegated (writer trigger); worker = general agent standing in 
   dropped by `bag_features`). Fetched clone sources match `6a26031`. Cache published as private Kaggle dataset
   `alejopatio/tramil-edaic-features` (status ready, anonymous API 403).
 
+- Decision (operator, 2026-11-18, "lo acepto como estan"): the four T2 deviations are accepted as they are -- cleaned audio
+  instead of the raw audio of Ec. 68, session gain -26 dBFS, silence threshold 35 dB, pre-cut wavs for 318/321/341/362.
+  The published feature cache stands; no re-extraction.
+
 ## Next step
 Full-scale E1 on all 141 train bags reading `alejopatio/tramil-edaic-features`; timing probe `Results/timing.json`;
-operator decision on the four T2 deviations.
