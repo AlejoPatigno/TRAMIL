@@ -107,3 +107,18 @@ def test_no_stamp_outside_the_runner(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     extract_run.run(_make_input(tmp_path / "in", False), tmp_path / "out", workers=1, limit=1)
     assert not (tmp_path / "shard.json").exists()
+
+
+def test_audio_found_inside_kaggle_extracted_zip_folder(tmp_path):
+    # Kaggle unpacks instances_audio.zip into a folder named after the archive, so the
+    # session folders sit one level deeper: instances_audio/instances_audio/<id>/.
+    root = _make_input(tmp_path / "in", as_zip=False)
+    inner = root / "instances_audio"
+    inner.rename(root / "tmp_audio")
+    (root / "instances_audio").mkdir()
+    (root / "tmp_audio").rename(root / "instances_audio" / "instances_audio")
+    assert not (root / "instances_audio" / "301").exists()
+    out = tmp_path / "out"
+    extract_run.run(root, out, workers=1)
+    for s in (301, 302, 303):
+        assert (out / f"{s}_X.npy").exists()

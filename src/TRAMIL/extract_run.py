@@ -41,7 +41,11 @@ def _find(root, depth=_MAX_DEPTH):
             if f in names:
                 found.setdefault(names[f], Path(here) / f)
         if "instances_audio" in dirs:
-            found.setdefault("audio", Path(here) / "instances_audio")
+            audio = Path(here) / "instances_audio"
+            # Kaggle unpacks instances_audio.zip into a folder named after the archive.
+            while (audio / "instances_audio").is_dir():
+                audio = audio / "instances_audio"
+            found.setdefault("audio", audio)
             dirs.remove("instances_audio")  # thousands of wavs: never descend
         if level >= depth:
             dirs[:] = []
