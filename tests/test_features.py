@@ -95,3 +95,21 @@ def test_bag_cache_is_resumable():
 
         X2 = features._acoustic_bag(bag, d / "c", Boom())
         assert X1.shape == (2, 88) and np.array_equal(X1, X2)
+
+
+def test_nonfinite_instances_are_excluded_from_the_bag():
+    import tempfile
+    from pathlib import Path
+
+    from TRAMIL.bags import Bag
+
+    with tempfile.TemporaryDirectory() as d:
+        X = np.ones((3, 88), np.float32)
+        X[1, 4] = np.nan
+        E = np.arange(3, dtype=np.float32)[:, None] * np.ones((3, 768), np.float32)
+        np.save(Path(d) / "9_X.npy", X)
+        np.save(Path(d) / "9_E.npy", E)
+        bag = Bag(subject=9, y=1, y_distributed=1, texts=["a", "b", "c"], wavs=[Path("x")] * 3, idx=[0, 1, 2])
+        Xv, Ev = features.bag_features(bag, d)
+        assert Xv.shape == (2, 88) and np.isfinite(Xv).all()
+        assert Ev[:, 0].tolist() == [0.0, 2.0]  # the text rows of the surviving instances

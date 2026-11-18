@@ -15,6 +15,7 @@ __provenance__ = {
         "items_sum_to_total_for_all_275_rows",
         "recomputed_label_disagrees_with_flag_in_20_sessions",
         "e1_training_bags_are_141_subjects",
+        "stratified_subset_keeps_class_ratio_is_reproducible_and_sorted",
     ],
 }
 
@@ -74,3 +75,16 @@ def build_bags(instances, audio_dir, labels, split="train"):
             )
         )
     return out
+
+
+def stratified_subset(bags, n, seed):
+    """Label-stratified subject subset of size ~n (rehearsal scale), reproducible, returned in subject order."""
+    import numpy as np
+
+    g = np.random.default_rng(seed)
+    out = []
+    for yy in (0, 1):
+        grp = [b for b in bags if b.y == yy]
+        k = round(n * len(grp) / len(bags))
+        out += [grp[i] for i in g.choice(len(grp), k, replace=False)]
+    return sorted(out, key=lambda b: b.subject)

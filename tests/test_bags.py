@@ -67,3 +67,15 @@ def test_e1_training_bags_are_141_subjects():
     assert len(out) == 141
     assert sum(b.y for b in out) == 44  # proposal Section 3: 44 positive training subjects
     assert all(w.exists() for b in out for w in b.wavs)
+
+
+def test_stratified_subset_keeps_class_ratio_is_reproducible_and_sorted():
+    from TRAMIL.bags import Bag
+
+    mk = lambda i: Bag(subject=i, y=int(i < 30), y_distributed=0, texts=["a"], wavs=[Path("x")], idx=[0])
+    allb = [mk(i) for i in range(100)]
+    s1, s2 = bags.stratified_subset(allb, 20, seed=0), bags.stratified_subset(allb, 20, seed=0)
+    assert [b.subject for b in s1] == [b.subject for b in s2] and len(s1) == 20
+    assert sum(b.y for b in s1) == 6  # 30% of 20
+    assert [b.subject for b in s1] == sorted(b.subject for b in s1)
+    assert [b.subject for b in s1] != [b.subject for b in bags.stratified_subset(allb, 20, seed=1)]

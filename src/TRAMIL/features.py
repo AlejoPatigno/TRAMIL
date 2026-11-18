@@ -16,6 +16,7 @@ __provenance__ = {
         "session_gain_hits_target_level_without_clipping",
         "text_embeddings_are_unit_norm_768",
         "bag_cache_is_resumable",
+        "nonfinite_instances_are_excluded_from_the_bag",
     ],
 }
 
@@ -153,9 +154,11 @@ def extract_all(bags, cache_dir, workers=1):
 
 
 def bag_features(bag, cache_dir, smile=None):
-    """(X_b, E_b) for one bag, cached per subject under cache_dir (resumable)."""
+    """(X_b, E_b) for one bag, cached per subject under cache_dir (resumable); non-finite instances dropped."""
     X = _acoustic_bag(bag, cache_dir, smile or _worker_smile())
     path = Path(cache_dir) / f"{bag.subject}_E.npy"
     if not path.exists():
         np.save(path, embed_texts(bag.texts))
-    return X, np.load(path)
+    E = np.load(path)
+    ok = np.isfinite(X).all(1)  # Section 3: non-finite vectors are excluded from the bag
+    return X[ok], E[ok]
