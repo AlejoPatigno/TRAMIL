@@ -13,3 +13,16 @@ __implementation__ = {
     },
 }
 __backend__ = "torch"
+
+__steps__ = {
+    "extract-features": {
+        "module": "TRAMIL.extract_run",
+        "function": "run",
+        "advances": 1,
+        "reads": [],
+        "produces": ["Data/features"],
+        "placement": "remote",
+        "job": "extract-features",
+        "service": "kaggle",
+    },
+}
