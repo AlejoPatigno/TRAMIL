@@ -90,14 +90,14 @@ def test_input_root_found_below_a_mount_directory(tmp_path):
     assert (out / "301_X.npy").exists()
 
 
-def test_smoke_stamp_carries_commit_digest_device(tmp_path, monkeypatch):
+def test_smoke_stamp_carries_commit_and_device(tmp_path, monkeypatch):
     monkeypatch.setenv("FORGE_RUN_MODE", "smoke")
     monkeypatch.setenv("FORGE_CLONE_COMMIT", "a" * 40)
     monkeypatch.chdir(tmp_path)
     root = _make_input(tmp_path / "in", True)
     extract_run.run(root, tmp_path / "out", workers=1, limit=2)
     stamp = json.loads((tmp_path / "shard.json").read_text())
-    assert stamp["evidence"]["commit"] and len(stamp["evidence"]["sourcesDigest"]) == 64
+    assert stamp["evidence"]["commit"]
     assert stamp["environment"]["device"]["kind"] in {"cpu", "cuda"}
     assert stamp["runs"]["sessions"] == 2
 

@@ -1,5 +1,4 @@
 """Remote entry point: frozen feature extraction (eGeMAPS 7+81, mpnet) for every E-DAIC session with audio."""
-import hashlib
 import json
 import os
 import platform
@@ -22,7 +21,7 @@ __provenance__ = {
         "extraction_covers_train_and_dev_sessions",
         "limit_restricts_sessions_for_smoke",
         "input_root_found_below_a_mount_directory",
-        "smoke_stamp_carries_commit_digest_device",
+        "smoke_stamp_carries_commit_and_device",
         "no_stamp_outside_the_runner",
     ],
 }
@@ -73,7 +72,6 @@ def _stamp(summary):
     if not mode:
         return None
     src = Path(__file__).resolve().parent
-    digest = hashlib.sha256(b"".join(p.read_bytes() for p in sorted(src.glob("*.py")))).hexdigest()
     commit = None
     try:
         r = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True)
@@ -89,7 +87,7 @@ def _stamp(summary):
     except ImportError:
         cuda, name = False, None
     device = {"kind": "cuda", "name": name} if cuda else {"kind": "cpu", "name": platform.processor() or "cpu"}
-    payload = {"mode": mode, "evidence": {"commit": commit, "sourcesDigest": digest},
+    payload = {"mode": mode, "evidence": {"commit": commit},
                "environment": {"device": device}, "runs": summary}
     path = Path.cwd() / "shard.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
