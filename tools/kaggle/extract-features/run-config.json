@@ -1,12 +1,14 @@
 {
   "accelerator": {
-    "architectures": [],
-    "kind": "cpu"
+    "architectures": [
+      "sm_75"
+    ],
+    "kind": "cuda"
   },
   "clonePaths": [
     "src/TRAMIL"
   ],
-  "commit": "881765e0bef0858829b0917c7163181fe6ab2934",
+  "commit": "cc9fa335d0e22babe454d3d99137d41945f6f873",
   "environment": {
     "install": {
       "requirements": [
