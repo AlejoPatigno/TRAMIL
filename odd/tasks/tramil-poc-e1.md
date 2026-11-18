@@ -44,6 +44,14 @@ pipeline end to end before spending Kaggle quota on the 900-run protocol.
 - [x] T8 Kaggle feature extraction job: `TRAMIL.extract_run.run` (train+dev sessions, folder or zip input, `limit` for smoke),
       `__steps__["extract-features"]` (remote, kaggle), generated job `tools/kaggle/extract-features`. Route: inline
       (one new module + test; writer trigger not fired).
+- [x] T9 Full E1 remote entry `TRAMIL.e1_run`: 4 neural arms + SVM (Symptom-Guided deferred by the operator, 2026-11-18),
+      3 repetitions x 5 folds x seeds 11/23/37, max 80 epochs, inner 3-fold epoch selection; one result file per
+      (repetition, fold) written as soon as it finishes, existing ones skipped (resume across 12 h sessions); neural training
+      on CUDA when available; `merge` builds the E1 table from the partition files. Route: delegated (writer trigger:
+      new module + training device change + tests).
+- [ ] T10 Kaggle job `e1-full` (GPU, inputs: features + instances datasets): smoke with GPU-vs-CPU epoch timing shown to
+      the operator, then position -> propose -> offer -> gate -> submit (operator authorized, 2026-11-18); resume chunks until
+      all 15 partitions exist. Route: inline.
 
 ## Acceptance
 - Suite green under the target interpreter; `verify` fidelity clean; `agree` passes without acknowledgements.
@@ -103,6 +111,12 @@ Route: all tasks delegated (writer trigger); worker = general agent standing in 
 - Decision (operator, 2026-11-18, "lo acepto como estan"): the four T2 deviations are accepted as they are -- cleaned audio
   instead of the raw audio of Ec. 68, session gain -26 dBFS, silence threshold 35 dB, pre-cut wavs for 318/321/341/362.
   The published feature cache stands; no re-extraction.
+
+- T9 `c4e4abd` (delegated writer): RED = ImportError (`cannot import name 'e1_run'`); GREEN 67 passed, 3 skipped (parent spot
+  check re-ran the suite: 67 passed). Bags build from the CSVs + cached features without wavs. Resume by partition file;
+  merge pools the 15 units via `exp_e1._comparisons` (statistics reading to confirm with the operator). CUDA path covered only
+  by a monkeypatched device test until the T10 smoke. SVM stays inside the GPU job (pilot: 1.2 s for all SVM folds; a separate
+  CPU job would cost more in setup than the work).
 
 ## Next step
 Full-scale E1 on all 141 train bags reading `alejopatio/tramil-edaic-features`; timing probe `Results/timing.json`;
