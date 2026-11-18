@@ -103,13 +103,19 @@ def acoustic_vector(x, sr, gain, smile):
 _model = None
 
 
+def _text_device():
+    import torch
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def embed_texts(texts, batch_size=32):
     """phi_t (Ec. 7, 8): frozen all-mpnet-base-v2, 768-d, unit Euclidean norm."""
     global _model
     if _model is None:
         from sentence_transformers import SentenceTransformer
 
-        _model = SentenceTransformer(TEXT_MODEL, device="cpu")
+        _model = SentenceTransformer(TEXT_MODEL, device=_text_device())
     return _model.encode(list(texts), batch_size=batch_size, normalize_embeddings=True).astype(np.float32)
 
 

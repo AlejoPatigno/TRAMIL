@@ -113,3 +113,13 @@ def test_nonfinite_instances_are_excluded_from_the_bag():
         Xv, Ev = features.bag_features(bag, d)
         assert Xv.shape == (2, 88) and np.isfinite(Xv).all()
         assert Ev[:, 0].tolist() == [0.0, 2.0]  # the text rows of the surviving instances
+
+
+def test_text_encoder_uses_gpu_when_available(monkeypatch):
+    import torch
+    from TRAMIL import features as F
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert F._text_device() == "cuda"
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert F._text_device() == "cpu"
