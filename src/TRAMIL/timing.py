@@ -55,3 +55,7 @@ def epoch_abmil(settings, wrap):
 
 def epoch_gated_abmil(settings, wrap):
     _epoch("gated_abmil", settings, wrap)
+
+
+if os.environ.get("TRAMIL_FEATURES"):  # load before the probe's clock starts: data loading is setup, not an epoch
+    _items()

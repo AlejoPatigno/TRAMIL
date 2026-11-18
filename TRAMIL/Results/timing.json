@@ -1,0 +1,139 @@
+{
+  "schema": 2,
+  "hosts": {
+    "local": {
+      "cpuCount": 16,
+      "ramGB": null,
+      "mps": false,
+      "cuda": false
+    }
+  },
+  "measurements": [
+    {
+      "measuredAt": "2026-11-18T22:17:26Z",
+      "host": "local",
+      "candidate": "local-cpu-1",
+      "device": "cpu",
+      "arm": "residual",
+      "unit": "epoch",
+      "secondsPerUnit": 1.1376,
+      "unitsMeasured": 1,
+      "processes": 1,
+      "threads": 16,
+      "loadSeconds": 0.0001,
+      "computeSeconds": 1.1374
+    },
+    {
+      "measuredAt": "2026-11-18T22:19:09Z",
+      "host": "local",
+      "candidate": "local-cpu-8",
+      "device": "cpu",
+      "arm": "residual",
+      "unit": "epoch",
+      "secondsPerUnit": 1.7997,
+      "unitsMeasured": 1,
+      "processes": 8,
+      "threads": 2,
+      "loadSeconds": 0.0002,
+      "computeSeconds": 1.7996
+    },
+    {
+      "measuredAt": "2026-11-18T22:19:33Z",
+      "host": "local",
+      "candidate": "local-cpu-1",
+      "device": "cpu",
+      "arm": "learned_only",
+      "unit": "epoch",
+      "secondsPerUnit": 1.2347,
+      "unitsMeasured": 1,
+      "processes": 1,
+      "threads": 16,
+      "loadSeconds": 0.0001,
+      "computeSeconds": 1.2345
+    },
+    {
+      "measuredAt": "2026-11-18T22:21:25Z",
+      "host": "local",
+      "candidate": "local-cpu-8",
+      "device": "cpu",
+      "arm": "learned_only",
+      "unit": "epoch",
+      "secondsPerUnit": 1.73,
+      "unitsMeasured": 1,
+      "processes": 8,
+      "threads": 2,
+      "loadSeconds": 0.0002,
+      "computeSeconds": 1.7298
+    },
+    {
+      "measuredAt": "2026-11-18T22:21:54Z",
+      "host": "local",
+      "candidate": "local-cpu-1",
+      "device": "cpu",
+      "arm": "abmil",
+      "unit": "epoch",
+      "secondsPerUnit": 1.3721,
+      "unitsMeasured": 1,
+      "processes": 1,
+      "threads": 16,
+      "loadSeconds": 0.0003,
+      "computeSeconds": 1.3718
+    },
+    {
+      "measuredAt": "2026-11-18T22:23:34Z",
+      "host": "local",
+      "candidate": "local-cpu-8",
+      "device": "cpu",
+      "arm": "abmil",
+      "unit": "epoch",
+      "secondsPerUnit": 1.4932,
+      "unitsMeasured": 1,
+      "processes": 8,
+      "threads": 2,
+      "loadSeconds": 0.0002,
+      "computeSeconds": 1.493
+    },
+    {
+      "measuredAt": "2026-11-18T22:23:55Z",
+      "host": "local",
+      "candidate": "local-cpu-1",
+      "device": "cpu",
+      "arm": "gated_abmil",
+      "unit": "epoch",
+      "secondsPerUnit": 0.9897,
+      "unitsMeasured": 1,
+      "processes": 1,
+      "threads": 16,
+      "loadSeconds": 0.0001,
+      "computeSeconds": 0.9896
+    },
+    {
+      "measuredAt": "2026-11-18T22:25:13Z",
+      "host": "local",
+      "candidate": "local-cpu-8",
+      "device": "cpu",
+      "arm": "gated_abmil",
+      "unit": "epoch",
+      "secondsPerUnit": 1.4428,
+      "unitsMeasured": 1,
+      "processes": 8,
+      "threads": 2,
+      "loadSeconds": 0.0005,
+      "computeSeconds": 1.4423
+    }
+  ],
+  "scales": {
+    "poc": {
+      "arms": 4,
+      "folds": 8,
+      "seeds": 1,
+      "epochs": 8
+    },
+    "full": {
+      "arms": 5,
+      "folds": 60,
+      "seeds": 3,
+      "epochs": 80
+    }
+  }
+}
