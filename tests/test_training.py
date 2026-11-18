@@ -87,3 +87,10 @@ def test_bootstrap_difference_uses_the_same_indices_for_both_methods():
 
     base = roc_auc_score(y, a) - roc_auc_score(y, 1 - a)
     assert rev.mean() > 0.3 and abs(rev.mean() - base) < 0.15  # AUROC(a) - AUROC(1 - a) = 2 AUROC(a) - 1 per draw
+
+
+def test_training_device_is_cuda_when_available_else_cpu(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert training.device().type == "cpu"
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert training.device().type == "cuda"

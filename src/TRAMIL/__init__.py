@@ -28,4 +28,14 @@ __steps__ = {
         "job": "extract-features",
         "service": "kaggle",
     },
+    "e1-full": {
+        "module": "TRAMIL.e1_run",
+        "function": "run",
+        "advances": 1,
+        "reads": ["Data/features"],
+        "produces": ["Results/E1"],
+        "placement": "remote",
+        "job": "e1-full",
+        "service": "kaggle",
+    },
 }
