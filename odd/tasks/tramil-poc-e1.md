@@ -49,7 +49,7 @@ pipeline end to end before spending Kaggle quota on the 900-run protocol.
       (repetition, fold) written as soon as it finishes, existing ones skipped (resume across 12 h sessions); neural training
       on CUDA when available; `merge` builds the E1 table from the partition files. Route: delegated (writer trigger:
       new module + training device change + tests).
-- [ ] T10 Kaggle job `e1-full` (GPU, inputs: features + instances datasets): smoke with GPU-vs-CPU epoch timing shown to
+- [x] T10 Kaggle job `e1-full` (GPU, inputs: features + instances datasets): smoke with GPU-vs-CPU epoch timing shown to
       the operator, then position -> propose -> offer -> gate -> submit (operator authorized, 2026-11-18); resume chunks until
       all 15 partitions exist. Route: inline.
 
@@ -118,5 +118,14 @@ Route: all tasks delegated (writer trigger); worker = general agent standing in 
   by a monkeypatched device test until the T10 smoke. SVM stays inside the GPU job (pilot: 1.2 s for all SVM folds; a separate
   CPU job would cost more in setup than the work).
 
+- T10: `be64e5d` fixed `bag_features` building the opensmile extractor before checking the cache (RED observed; 68 passed).
+  T4 smoke 0.10-0.16 s/epoch (local CPU 1.0-1.4 s). Campaign on T4 at `be64e5d`: ~5 h 20 min, 15/15 units, fetched sources
+  match the pin. Result (`TRAMIL/Results/E1_full.md`): mean AUROC residual 0.474, learned-only 0.455, ABMIL 0.462, Gated
+  ABMIL 0.456, SVM 0.451; no paired difference (p 0.67-0.78, TOST intervals cross -0.05). Checks: Kaggle features equal the
+  local pilot features (median rel. diff 5e-8); SVM folds reproduce exactly on local CPU; SVM permutation null (200 perms,
+  same partitions): null mean 0.501, 5-95% [0.399, 0.601], p(null >= observed) 0.765 -> no detectable signal at full scale.
+  The 48-bag pilot (0.58-0.76) was optimistic small-sample noise.
+
 ## Next step
-Full-scale E1 on all 141 train bags reading `alejopatio/tramil-edaic-features`; timing probe `Results/timing.json`;
+Operator: read the E1 result (no detectable signal) and decide the next move (G-EXP-POC discussion, Symptom-Guided,
+feature or model diagnosis); confirm the statistics reading of pooling 15 units through the corrected resampled t.
