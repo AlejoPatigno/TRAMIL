@@ -1,4 +1,5 @@
 """Frozen feature extraction: eGeMAPSv02 split 7 + 81 (Ec. 5, 6, 68) and all-mpnet-base-v2 embeddings (Ec. 7, 8)."""
+import os
 import wave
 from pathlib import Path
 
@@ -108,6 +109,11 @@ def acoustic_vector(x, sr, gain, smile):
     full = smile.process_signal(gx, sr).iloc[0].to_numpy()
     cut = smile.process_signal(remove_silence(gx, sr), sr).iloc[0].to_numpy()
     return np.concatenate([full[tmp], cut[rest]]).astype(np.float32)
+
+
+def acoustic_from_env():
+    """Acoustic source of the E1 entry points: $TRAMIL_ACOUSTIC (egemaps | wavlm), default egemaps."""
+    return os.environ.get("TRAMIL_ACOUSTIC") or "egemaps"
 
 
 def load_wavlm():
@@ -223,11 +229,11 @@ def extract_all(bags, cache_dir, workers=1, acoustic="egemaps"):
         bag_features(b, cache_dir)
 
 
-def bag_features(bag, cache_dir, smile=None, acoustic="egemaps"):
+def bag_features(bag, cache_dir, smile=None, acoustic="egemaps", text_dir=None):
     """(X_b, E_b) for one bag, cached per subject under cache_dir (resumable); non-finite instances dropped.
-    acoustic="wavlm" reads {subject}_W.npy in place of {subject}_X.npy."""
+    acoustic="wavlm" reads {subject}_W.npy in place of {subject}_X.npy; E_b comes from text_dir when given."""
     X = _wavlm_bag(bag, cache_dir) if acoustic == "wavlm" else _acoustic_bag(bag, cache_dir, smile)
-    path = Path(cache_dir) / f"{bag.subject}_E.npy"
+    path = Path(text_dir or cache_dir) / f"{bag.subject}_E.npy"
     if not path.exists():
         np.save(path, embed_texts(bag.texts))
     E = np.load(path)

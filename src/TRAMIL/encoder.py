@@ -1,4 +1,4 @@
-"""Trainable acoustic encoding H = ReLU(X W_x + b_x), 88 -> 32 (Ec. 13, 14)."""
+"""Trainable acoustic encoding H = ReLU(X W_x + b_x), d_in -> 32 (Ec. 13, 14); d_in = 88 (eGeMAPS, default) or 768 (WavLM)."""
 from torch import nn
 
 __provenance__ = {

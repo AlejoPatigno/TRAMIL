@@ -32,8 +32,9 @@ NOTE = (
 )
 
 
-def load_items(labels_path, edaic_dir, cache_dir, n_bags=None, seed=0):
-    """Training-split bags with their features: (X raw 88-d, R proximity, y) per subject, plus the exclusions."""
+def load_items(labels_path, edaic_dir, cache_dir, n_bags=None, seed=0, acoustic="egemaps", text_dir=None):
+    """Training-split bags with their features: (X raw, R proximity, y) per subject, plus the exclusions.
+    X is the 88-d eGeMAPS block (default) or the 768-d WavLM layer-6 vector (acoustic="wavlm")."""
     import pandas as pd
 
     edaic = Path(edaic_dir)
@@ -43,7 +44,7 @@ def load_items(labels_path, edaic_dir, cache_dir, n_bags=None, seed=0):
     Q = features.embed_texts(features.DESCRIPTORS)
     items, dropped = [], 0
     for b in chosen:
-        X, E = features.bag_features(b, cache_dir)
+        X, E = features.bag_features(b, cache_dir, acoustic=acoustic, text_dir=text_dir)
         dropped += len(b) - len(X)
         if len(X):
             items.append({"subject": b.subject, "X": X, "R": proximity.proximity(E, Q), "y": b.y})
@@ -51,6 +52,7 @@ def load_items(labels_path, edaic_dir, cache_dir, n_bags=None, seed=0):
 
 
 def _neural(make, items, train_idx, test_idx, k, seeds, max_epochs):
+    make = functools.partial(make, d_in=items[0]["X"].shape[1])  # input dim comes from the data
     y = [it["y"] for it in items]
     pick = lambda idx: [(items[i]["X"], items[i]["R"], items[i]["y"]) for i in idx]
 

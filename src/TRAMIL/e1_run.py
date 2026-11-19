@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.metrics import roc_auc_score
 
-from . import comparators, exp_e1, training, validation
+from . import comparators, exp_e1, features, training, validation
 
 __provenance__ = {
     "revision": "experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v04.md",
@@ -25,10 +25,12 @@ __provenance__ = {
         "bags_build_from_csv_and_features_without_wav_files",
         "stamp_only_under_the_runner_with_commit_device_and_epoch_timing",
         "mounted_datasets_are_found_through_the_forge_map",
+        "wavlm_variant_reads_w_features_and_writes_to_e1_wavlm",
     ],
 }
 
 FEATURES_REF = "alejopatio/tramil-edaic-features"
+WAVLM_REF = "alejopatio/tramil-edaic-wavlm"
 INSTANCES_REF = "alejopatio/tramil-edaic-instances"
 ABSENT_ARMS = ["symptom_guided"]
 NEURAL = list(exp_e1.ARMS)
@@ -36,33 +38,39 @@ INNER_FOLDS = 3  # validation.inner_splits default; epochs trained per seed = IN
 _MAX_DEPTH = 6
 
 
-def _find(roots, depth=_MAX_DEPTH):
-    """Labels, instances CSV and the flat features folder, searched below each root (never inside wav folders)."""
+def _find(roots, depth=_MAX_DEPTH, acoustic="egemaps"):
+    """Labels, instances CSV and the flat features folder, searched below each root (never inside wav folders).
+    acoustic="wavlm": features = folder with _W.npy; text = folder with the mpnet _E.npy."""
+    suffix = "_W.npy" if acoustic == "wavlm" else "_X.npy"
     found = {}
     for root in map(Path, roots):
         for here, dirs, files in os.walk(root):
             for f, key in (("detailed_lables.csv", "labels"), ("instances_clean.csv", "instances")):
                 if f in files:
                     found.setdefault(key, Path(here) / f)
-            if any(f.endswith("_X.npy") for f in files):
+            if any(f.endswith(suffix) for f in files):
                 found.setdefault("features", Path(here))
+            if acoustic == "wavlm" and any(f.endswith("_E.npy") for f in files):
+                found.setdefault("text", Path(here))
             dirs[:] = [d for d in dirs if not d.startswith("instances_audio")]
             if len(Path(here).relative_to(root).parts) >= depth:
                 dirs[:] = []
-    missing = {"labels", "instances", "features"} - found.keys()
+    missing = {"labels", "instances", "features", *(["text"] if acoustic == "wavlm" else [])} - found.keys()
     if missing:
         raise FileNotFoundError(f"{sorted(missing)} not found below {[str(r) for r in roots]}")
     return found
 
 
-def _default_roots():
+def _default_roots(acoustic="egemaps"):
     mounted = json.loads(os.environ.get("FORGE_INPUT_DATASETS") or "{}")
-    roots = [mounted[r] for r in (FEATURES_REF, INSTANCES_REF) if r in mounted]
+    refs = (FEATURES_REF, INSTANCES_REF, *([WAVLM_REF] if acoustic == "wavlm" else []))
+    roots = [mounted[r] for r in refs if r in mounted]
     return roots or ["TRAMIL/Data"]
 
 
-def _default_out_dir():
-    return Path(os.environ.get("FORGE_CLONE_ROOT", ".")) / "TRAMIL" / "Results" / "E1"
+def _default_out_dir(acoustic="egemaps"):
+    name = "E1_wavlm" if acoustic == "wavlm" else "E1"
+    return Path(os.environ.get("FORGE_CLONE_ROOT", ".")) / "TRAMIL" / "Results" / name
 
 
 def _unit_id(r, k):
@@ -176,12 +184,14 @@ def _stamp(summary):
 
 
 def run(input_root=None, out_dir=None, partitions=None, seeds=(11, 23, 37), max_epochs=80, repetitions=3,
-        n_folds=5, limit_bags=None, resume_from=None):
-    """Run the pending (repetition, fold) units of E1, one partition file each; resumable, merges at the end."""
-    found = _find([input_root] if input_root else _default_roots())
-    out = Path(out_dir) if out_dir else _default_out_dir()
+        n_folds=5, limit_bags=None, resume_from=None, acoustic=None):
+    """Run the pending (repetition, fold) units of E1, one partition file each; resumable, merges at the end.
+    acoustic: "egemaps" (default) or "wavlm"; falls back to $TRAMIL_ACOUSTIC. WavLM results go to Results/E1_wavlm."""
+    acoustic = acoustic or features.acoustic_from_env()
+    found = _find([input_root] if input_root else _default_roots(acoustic), acoustic=acoustic)
+    out = Path(out_dir) if out_dir else _default_out_dir(acoustic)
     out.mkdir(parents=True, exist_ok=True)
-    skip_refs = {FEATURES_REF, INSTANCES_REF}
+    skip_refs = {FEATURES_REF, INSTANCES_REF, WAVLM_REF}
     mounted = json.loads(os.environ.get("FORGE_INPUT_DATASETS") or "{}")
     for src in [resume_from] if resume_from else [v for ref, v in mounted.items() if ref not in skip_refs]:
         for f in Path(src).rglob("partition_r*_f*.json"):
@@ -194,7 +204,8 @@ def run(input_root=None, out_dir=None, partitions=None, seeds=(11, 23, 37), max_
     secs, epochs = dict.fromkeys(NEURAL, 0.0), dict.fromkeys(NEURAL, 0)
     for r, k in pending:
         if items is None:  # features are read only when a unit actually has to run
-            items, info = exp_e1.load_items(found["labels"], found["instances"].parent, found["features"], limit_bags)
+            items, info = exp_e1.load_items(found["labels"], found["instances"].parent, found["features"], limit_bags,
+                                         acoustic=acoustic, text_dir=found.get("text"))
         p = _unit(items, r, k, n_folds, tuple(seeds), max_epochs)
         _write_json(out / f"partition_{_unit_id(r, k)}.json", p)
         ran.append(_unit_id(r, k))

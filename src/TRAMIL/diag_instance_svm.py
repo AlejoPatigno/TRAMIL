@@ -1,5 +1,5 @@
 """Diagnostic (not part of E1): instance-level linear SVM on eGeMAPS (X is the 88-d acoustic block only; text
-embeddings live in the separate E array), subject labels inherited by instances, scores aggregated per subject.
+embeddings live in the separate E array; TRAMIL_ACOUSTIC=wavlm runs it on the 768-d WavLM vectors), subject labels inherited by instances, scores aggregated per subject.
 Run: python -m TRAMIL.diag_instance_svm"""
 import time
 from pathlib import Path
@@ -11,7 +11,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 
-from . import comparators, e1_run, exp_e1, validation
+from . import comparators, e1_run, exp_e1, features, validation
 
 GRID = [0.001, 0.01, 0.1, 1.0]
 AGGS = ("mean", "max", "top3")
@@ -86,26 +86,30 @@ def run(items, repetitions=3, n_folds=5, grid=GRID):
 AGGS_NAMES = tuple(f"instance_{a}" for a in AGGS)
 
 
-def report(res, out_dir):
+def report(res, out_dir, acoustic="egemaps"):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    e1_run._write_json(out / "diag_instance_svm.json", res)
+    sfx = "_wavlm" if acoustic == "wavlm" else ""
+    e1_run._write_json(out / f"diag_instance_svm{sfx}.json", res)
     ips = res["instances_per_subject"]
-    md = ["# Diagnostic: instance-level SVM (eGeMAPS only)", "",
+    title = "WavLM layer 6" if sfx else "eGeMAPS only"
+    md = [f"# Diagnostic: instance-level SVM ({title})", "",
           f"{res['n_subjects']} subjects, {res['units']} outer units, instances/subject min/median/max "
           f"{ips['min']}/{ips['median']:.0f}/{ips['max']}, C grid {res['grid']}, {res['seconds']:.0f} s", "",
           "| arm | mean train AUROC | mean val AUROC | per-fold val AUROC |", "| --- | --- | --- | --- |"]
     for n, a in res["arms"].items():
         md.append(f"| {n} | {np.mean(a['train_auroc']):.3f} | {np.mean(a['val_auroc']):.3f} | "
                   + ", ".join(f"{v:.3f}" for v in a["val_auroc"]) + " |")
-    (out / "diag_instance_svm.md").write_text("\n".join(md) + "\n")
+    (out / f"diag_instance_svm{sfx}.md").write_text("\n".join(md) + "\n")
 
 
-def main(out_dir="TRAMIL/Results"):
-    found = e1_run._find(e1_run._default_roots())
-    items, _ = exp_e1.load_items(found["labels"], found["instances"].parent, found["features"])
+def main(out_dir="TRAMIL/Results", acoustic=None):
+    acoustic = acoustic or features.acoustic_from_env()
+    found = e1_run._find(e1_run._default_roots(acoustic), acoustic=acoustic)
+    items, _ = exp_e1.load_items(found["labels"], found["instances"].parent, found["features"], acoustic=acoustic,
+                                 text_dir=found.get("text"))
     res = run(items)
-    report(res, out_dir)
+    report(res, out_dir, acoustic)
     return res
 
 

@@ -16,12 +16,12 @@ __provenance__ = {
 
 
 class ResidualBipartite(nn.Module):
-    """forward(X_std (N, 88), R (N, 8)) -> bag logit eta. learned_only: A = softmax_i(D) and R unused (Ec. 36)."""
+    """forward(X_std (N, d_in), R (N, 8)) -> bag logit eta; d_in = 88 for eGeMAPS, 768 for WavLM. learned_only: A = softmax_i(D) and R unused (Ec. 36)."""
 
-    def __init__(self, learned_only=False, per_node_lambda=False):
+    def __init__(self, learned_only=False, per_node_lambda=False, d_in=88):
         super().__init__()
         self.learned_only = learned_only
-        self.encoder = encoder.Encoder()
+        self.encoder = encoder.Encoder(d_in=d_in)
         self.corrector = corrector.Corrector()
         self.intensity = None if learned_only else corrector.PriorIntensity(8 if per_node_lambda else None)
         self.head = aggregation.Head(8 * 32)

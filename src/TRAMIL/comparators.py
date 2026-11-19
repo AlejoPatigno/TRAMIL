@@ -26,9 +26,9 @@ PRIOR_SEED = 2026
 class ABMIL(nn.Module):
     """s_i = w_a^T tanh(V h_i + b_v), optionally gated by sigma(U_a h_i + b_u); softmax over instances."""
 
-    def __init__(self, gated=False, h=32):
+    def __init__(self, gated=False, h=32, d_in=88):
         super().__init__()
-        self.encoder = encoder.Encoder(h=h)
+        self.encoder = encoder.Encoder(d_in=d_in, h=h)
         self.V = nn.Linear(h, h)
         self.U = nn.Linear(h, h) if gated else None
         self.w = nn.Linear(h, 1, bias=False)
@@ -53,7 +53,7 @@ def permute_prior(R, subject, seed=PRIOR_SEED):
 
 
 def bag_stats(X):
-    """s_b = [mean ; sample std] of the eGeMAPS functionals, R^176; the std of a single instance is 0."""
+    """s_b = [mean ; sample std] of the instance features: R^176 for eGeMAPS, R^1536 for WavLM; std of one instance is 0."""
     sd = X.std(0, ddof=1) if len(X) > 1 else np.zeros(X.shape[1], X.dtype)
     return np.concatenate([X.mean(0), sd]).astype(np.float32)
 
