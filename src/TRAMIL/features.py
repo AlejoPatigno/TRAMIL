@@ -17,10 +17,20 @@ __provenance__ = {
         "text_embeddings_are_unit_norm_768",
         "bag_cache_is_resumable",
         "nonfinite_instances_are_excluded_from_the_bag",
+        "wavlm_layer6_mean_pool_replaces_ec68_acoustic_map",
+        "wavlm_cache_rows_align_with_the_egemaps_instance_order",
+        "wavlm_cache_hit_does_not_load_the_model",
     ],
+    # PoC deviation chosen by the operator (2026-11-19): for the WavLM variant of E1, the acoustic instance map of
+    # Ec. 68 (eGeMAPS 7+81) is replaced by frozen microsoft/wavlm-base-plus hidden layer 6, mean-pooled over time
+    # (768-d). No silence removal, no session gain; the 7+81 pause split does not apply. Default stays eGeMAPS.
+    "deviation": "wavlm variant replaces the Ec. 68 acoustic map; eGeMAPS path unchanged",
 }
 
 SR = 16000
+WAVLM_MODEL = "microsoft/wavlm-base-plus"
+WAVLM_LAYER = 6  # hidden_states[0] is the CNN/embedding output
+WAVLM_MIN = 400  # one WavLM frame (25 ms at 16 kHz)
 TEXT_MODEL = "sentence-transformers/all-mpnet-base-v2"
 # The six temporal descriptors of eGeMAPSv02 plus the equivalent sound level (Section 18.9).
 TEMPORAL = (
@@ -100,6 +110,54 @@ def acoustic_vector(x, sr, gain, smile):
     return np.concatenate([full[tmp], cut[rest]]).astype(np.float32)
 
 
+def load_wavlm():
+    """(model, feature extractor): frozen WavLM base+ in eval mode on the GPU when available, else the CPU."""
+    import torch
+    from transformers import AutoFeatureExtractor, WavLMModel
+
+    model = WavLMModel.from_pretrained(WAVLM_MODEL).eval().to("cuda" if torch.cuda.is_available() else "cpu")
+    return model, AutoFeatureExtractor.from_pretrained(WAVLM_MODEL)
+
+
+def wavlm_vector(x, sr, model, extractor):
+    """Frozen WavLM layer-6 hidden states mean-pooled over time: (hidden_size,) float32; 768-d for base+.
+
+    One segment per forward pass: the base model has no attention mask, so batching padded segments would change
+    the result. Segments below one frame are zero-padded to WAVLM_MIN samples."""
+    import torch
+
+    assert sr == SR
+    x = np.asarray(x, dtype=np.float32)
+    if len(x) < WAVLM_MIN:
+        x = np.concatenate([x, np.zeros(WAVLM_MIN - len(x), np.float32)])
+    inp = torch.from_numpy(extractor(x, sampling_rate=sr, return_tensors="np")["input_values"])
+    with torch.no_grad():
+        hs = model.eval()(inp.to(next(model.parameters()).device), output_hidden_states=True).hidden_states
+    return hs[WAVLM_LAYER].mean(1)[0].float().cpu().numpy().astype(np.float32)
+
+
+_wl = None
+
+
+def _worker_wavlm():
+    global _wl
+    if _wl is None:
+        _wl = load_wavlm()
+    return _wl
+
+
+def _wavlm_bag(bag, cache_dir, wavlm=None):
+    """W_b (n_instances, hidden) in the row order of X_b; cached as {subject}_W.npy, the model loaded only on a miss."""
+    path = Path(cache_dir) / f"{bag.subject}_W.npy"
+    if path.exists():
+        return np.load(path)
+    model, extractor = wavlm or _worker_wavlm()
+    W = np.stack([wavlm_vector(read_wav(w), SR, model, extractor) for w in bag.wavs])
+    Path(cache_dir).mkdir(parents=True, exist_ok=True)
+    np.save(path, W)
+    return W
+
+
 _model = None
 
 
@@ -148,10 +206,15 @@ def _worker_smile():
     return _ws
 
 
-def extract_all(bags, cache_dir, workers=1):
-    """Resumable: acoustic X_b per subject (process pool) then text E_b per subject; cached under cache_dir."""
+def extract_all(bags, cache_dir, workers=1, acoustic="egemaps"):
+    """Resumable: acoustic X_b per subject (process pool) then text E_b per subject; cached under cache_dir.
+    acoustic="wavlm": only the W_b caches, sequentially (one model on the device); no text embeddings."""
     from concurrent.futures import ProcessPoolExecutor
 
+    if acoustic == "wavlm":
+        for b in bags:
+            _wavlm_bag(b, cache_dir)
+        return
     todo = [b for b in bags if not (Path(cache_dir) / f"{b.subject}_X.npy").exists()]
     if todo and workers > 1:
         with ProcessPoolExecutor(workers) as ex:
@@ -160,9 +223,10 @@ def extract_all(bags, cache_dir, workers=1):
         bag_features(b, cache_dir)
 
 
-def bag_features(bag, cache_dir, smile=None):
-    """(X_b, E_b) for one bag, cached per subject under cache_dir (resumable); non-finite instances dropped."""
-    X = _acoustic_bag(bag, cache_dir, smile)
+def bag_features(bag, cache_dir, smile=None, acoustic="egemaps"):
+    """(X_b, E_b) for one bag, cached per subject under cache_dir (resumable); non-finite instances dropped.
+    acoustic="wavlm" reads {subject}_W.npy in place of {subject}_X.npy."""
+    X = _wavlm_bag(bag, cache_dir) if acoustic == "wavlm" else _acoustic_bag(bag, cache_dir, smile)
     path = Path(cache_dir) / f"{bag.subject}_E.npy"
     if not path.exists():
         np.save(path, embed_texts(bag.texts))

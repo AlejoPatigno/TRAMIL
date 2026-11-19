@@ -3,3 +3,4 @@ __pycache__/
 *.egg-info/
 .implementation/
 Data/
+.pytest_tmp/

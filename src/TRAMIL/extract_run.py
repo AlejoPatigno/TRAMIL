@@ -1,4 +1,4 @@
-"""Remote entry point: frozen feature extraction (eGeMAPS 7+81, mpnet) for every E-DAIC session with audio."""
+"""Remote entry point: frozen feature extraction (eGeMAPS 7+81 + mpnet, or WavLM layer 6 with acoustic="wavlm") for every E-DAIC session with audio."""
 import json
 import os
 import platform
@@ -23,6 +23,7 @@ __provenance__ = {
         "input_root_found_below_a_mount_directory",
         "smoke_stamp_carries_commit_and_device",
         "no_stamp_outside_the_runner",
+        "wavlm_switch_writes_only_w_caches",
     ],
 }
 
@@ -98,8 +99,11 @@ def _stamp(summary):
     return path
 
 
-def run(input_root=None, out_dir=None, workers=None, limit=None):
-    """Extract the per-subject feature cache for train + dev sessions; `limit` keeps the first N subjects (smoke)."""
+def run(input_root=None, out_dir=None, workers=None, limit=None, acoustic=None):
+    """Extract the per-subject feature cache for train + dev sessions; `limit` keeps the first N subjects (smoke).
+    acoustic: "egemaps" (default; X + E caches) or "wavlm" (only W caches); falls back to $TRAMIL_ACOUSTIC."""
+    acoustic = acoustic or os.environ.get("TRAMIL_ACOUSTIC") or "egemaps"
+    assert acoustic in ("egemaps", "wavlm"), acoustic
     found = _find(input_root or _default_input_root())
     out = Path(out_dir) if out_dir else _default_out_dir()
     workers = workers or os.cpu_count() or 1
@@ -116,7 +120,7 @@ def run(input_root=None, out_dir=None, workers=None, limit=None):
         need = {f"instances_audio/{w.parent.name}/{w.name}" for b in chosen for w in b.wavs}
         with zipfile.ZipFile(found["zip"]) as z:
             z.extractall(tmp.name, [m for m in z.namelist() if m in need])
-    features.extract_all(chosen, out, workers)
+    features.extract_all(chosen, out, workers, acoustic)
     ids = {b.subject for b in chosen}
     summary = {
         "sessions": len(chosen),
@@ -124,6 +128,8 @@ def run(input_root=None, out_dir=None, workers=None, limit=None):
         "instances": sum(len(b) for b in chosen),
         "out_dir": out.name,
     }
+    if acoustic != "egemaps":
+        summary["acoustic"] = acoustic
     if tmp is not None:
         tmp.cleanup()
     _stamp(summary)
