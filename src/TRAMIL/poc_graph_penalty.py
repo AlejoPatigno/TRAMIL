@@ -54,6 +54,7 @@ def acoustic_adjacency(z):
 
 def row_js(P, Q):
     M = (P + Q) / 2
+    M = torch.where(M > 0, M, torch.ones_like(M))  # P = Q = 0 there; avoids 0 * log(0/0) = nan
     js = 0.5 * torch.xlogy(P, P / M).sum(1) + 0.5 * torch.xlogy(Q, Q / M).sum(1)
     return js.mean().item()
 
@@ -79,9 +80,9 @@ class Model(nn.Module):
         return self.head(Ht), Pi, Delta
 
 
-def make_data(seed, scenario, n_bags, split=0, label_noise=0.1):
+def make_data(seed, scenario, n_bags, split=0, label_noise=0.1, s=0.5):
     rng = np.random.default_rng(seed)
-    means = 0.5 * rng.standard_normal((J, D))
+    means = s * rng.standard_normal((J, D))  # s = cluster-mean sd (v1: 0.5; v2 sweeps it)
     rng = np.random.default_rng([seed, SCENARIOS.index(scenario), split])
     bags = []
     for _ in range(n_bags):
@@ -136,12 +137,12 @@ def evaluate(model, bags, kappa_tau=KAPPA_TAU, prior_only=False):
     return {k: float(np.mean(v)) for k, v in out.items()}
 
 
-def _verdicts(res):
+def _verdicts(res, mu_grid=MU_GRID):
     def m(sc, arm, k):
         return float(np.mean([r[k] for r in res[sc][arm]]))
 
-    arms = [str(mu) for mu in MU_GRID]
-    rhos = [spearmanr(MU_GRID, [res["disagree"][a][s]["js_G"] for a in arms]).statistic for s in SEEDS]
+    arms = [str(mu) for mu in mu_grid]
+    rhos = [spearmanr(mu_grid, [res["disagree"][a][s]["js_G"] for a in arms]).statistic for s in SEEDS]
     big = arms[-1]
     p1 = dict(spearman_per_seed=[float(r) for r in rhos], spearman_mean=float(np.mean(rhos)),
               js_G_at_max_mu=m("disagree", big, "js_G"), js_A_at_max_mu=m("disagree", big, "js_A"))
@@ -200,5 +201,87 @@ def run(out_dir=Path(__file__).resolve().parents[2] / "TRAMIL" / "Results"):
     return ver
 
 
+S_GRID = [0.5, 1.0, 2.0, 4.0]
+MU_GRID_V2 = [0.0, 1e-2, 1e-1, 1.0, 1000.0]
+
+
+def _verdicts_v2(res):
+    per_s = {s: _verdicts(res[s], MU_GRID_V2) for s in res}
+    q1_s = [s for s in res if per_s[s]["P2"]["pass"]]
+    js_a = [per_s[s]["P2"]["js_A_mu0"] for s in res]
+    rho = float(spearmanr([float(s) for s in res], js_a).statistic)
+    q1 = dict(pass_=bool(q1_s), s_where_P2_holds=q1_s, smallest_s=q1_s[0] if q1_s else None)
+    q2 = dict(js_A_mu0_per_s=js_a, spearman=rho, pass_=bool(rho <= -0.8))
+    q3 = dict(P1_per_s={s: per_s[s]["P1"]["pass"] for s in res}, P3_per_s={s: per_s[s]["P3"]["pass"] for s in res})
+    q3["pass_"] = all(q3["P1_per_s"].values()) and all(q3["P3_per_s"].values())
+    return dict(per_s=per_s, Q1=q1, Q2=q2, Q3=q3)
+
+
+def _markdown_v2(res, ver):
+    def cell(runs, k):
+        return f"{np.mean([r[k] for r in runs]):.4f} +- {np.std([r[k] for r in runs], ddof=1):.4f}"
+
+    q1, q2, q3 = ver["Q1"], ver["Q2"], ver["Q3"]
+    lines = ["# Synthetic PoC v2: acoustic SNR sweep (cluster-mean sd s, noise sd 1)", "",
+             f"Same model, task, data and settings as v1 (kappa/tau_e = {KAPPA_TAU}, 5 seeds, 64 train / 32 held-out bags); "
+             "only s varies. PoC settings, not proposal values. Mean +- sd over seeds, held-out bags.",
+             "JS = mean row Jensen-Shannon (nats); delta_rms = ||Delta||_F / N; task loss = CE vs clean z_ac.", "",
+             "Readings fixed before running: P1 Spearman is over the v2 mu grid (5 points) per seed, then averaged; "
+             "P3 checks every v2 mu; Q2 Spearman is over the 4 s values of the seed-mean JS(Pi,Pi_A); "
+             "P2/Q1 compare seed means at the same s.", ""]
+    for s in res:
+        lines += [f"## s = {s}", ""]
+        for sc in SCENARIOS:
+            lines += [f"### {sc}", "", "| mu | JS(Pi, Pi_G) | JS(Pi, Pi_A) | task loss | delta_rms |", "|---|---|---|---|---|"]
+            lines += [f"| {arm} | " + " | ".join(cell(runs, k) for k in ("js_G", "js_A", "loss", "delta_rms")) + " |"
+                      for arm, runs in res[s][sc].items()]
+            lines.append("")
+        v = ver["per_s"][s]
+        lines += [f"P1 {'PASS' if v['P1']['pass'] else 'FAIL'} (Spearman mean {v['P1']['spearman_mean']:.3f}; at mu = 1e3 "
+                  f"JS G {v['P1']['js_G_at_max_mu']:.4f} vs A {v['P1']['js_A_at_max_mu']:.4f}); "
+                  f"P2 {'PASS' if v['P2']['pass'] else 'FAIL'} (mu = 0: JS A {v['P2']['js_A_mu0']:.4f} vs G {v['P2']['js_G_mu0']:.4f}; "
+                  f"loss {v['P2']['loss_mu0']:.4f} vs prior-only {v['P2']['loss_prior_only']:.4f}); "
+                  f"P3 {'PASS' if v['P3']['pass'] else 'FAIL'} (agree max loss {max(v['P3']['loss_per_mu'].values()):.4f} "
+                  f"vs bound {v['P3']['bound']:.4f})", ""]
+    if q1["pass_"] and q2["pass_"] and q3["pass_"]:
+        reading = "Q1 & Q2 & Q3 hold -> v1 failure was the scenario; proceed to plan full E-DAIC tests."
+    elif not q1["pass_"]:
+        reading = "Q1 fails -> Delta does not learn acoustic structure even with strong signal -> mathematical fix in r12 before E-DAIC."
+    else:
+        reading = "Q1 holds but Q2 and/or Q3 fail -> not covered by the pre-registered reading; operator decides."
+    lines += ["## Verdicts (pre-registered Q1-Q3)", "",
+              f"- Q1 mechanism: v1's P2 holds at s = {q1['s_where_P2_holds']} (smallest s: {q1['smallest_s']}). "
+              f"**{'PASS' if q1['pass_'] else 'FAIL'}**",
+              f"- Q2 dose-response: disagree mu = 0 JS(Pi,Pi_A) per s {[round(x, 4) for x in q2['js_A_mu0_per_s']]}, "
+              f"Spearman {q2['spearman']:.3f} (needs <= -0.8). **{'PASS' if q2['pass_'] else 'FAIL'}**",
+              f"- Q3: P1 per s {q3['P1_per_s']}, P3 per s {q3['P3_per_s']}. **{'PASS' if q3['pass_'] else 'FAIL'}**",
+              "", f"**Reading: {reading}**", ""]
+    return "\n".join(lines)
+
+
+def run_v2(out_dir=Path(__file__).resolve().parents[2] / "TRAMIL" / "Results"):
+    res = {}
+    for s in S_GRID:
+        res[s] = {}
+        for sc in SCENARIOS:
+            res[s][sc] = {str(mu): [] for mu in MU_GRID_V2} | {"prior_only": []}
+            for seed in SEEDS:
+                tr, te = make_data(seed, sc, 64, s=s), make_data(seed, sc, 32, split=1, s=s)
+                for mu in MU_GRID_V2:
+                    res[s][sc][str(mu)].append(evaluate(train(tr, mu, seed=seed), te))
+                res[s][sc]["prior_only"].append(evaluate(train(tr, 0.0, seed=seed, prior_only=True), te, prior_only=True))
+                print(s, sc, seed, flush=True)
+    ver = _verdicts_v2(res)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "poc_graph_penalty_v2.json").write_text(json.dumps(dict(
+        settings=dict(kappa_tau=KAPPA_TAU, s_grid=S_GRID, noise_sd=1.0, mu_grid=MU_GRID_V2, seeds=list(SEEDS), n_train=64,
+                      n_test=32, epochs=40, lr=1e-2, note="PoC settings on synthetic data, not proposal values"),
+        results={str(s): r for s, r in res.items()},
+        verdicts=json.loads(json.dumps(ver, default=str))), indent=2))
+    (out_dir / "poc_graph_penalty_v2.md").write_text(_markdown_v2(res, ver))
+    return ver
+
+
 if __name__ == "__main__":
-    print(run()["overall"])
+    import sys
+    print(run_v2()["Q1"] if "v2" in sys.argv else run()["overall"])

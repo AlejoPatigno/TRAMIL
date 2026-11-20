@@ -45,8 +45,36 @@ TDD strict. Runner: `.venv/Scripts/python.exe -m pytest -q --basetemp=.pytest_tm
     clusters (JS to A unchanged vs prior-only) and overfits; the penalty pull itself works as intended.
 - Commit: 82db92f (feat: synthetic PoC of the Delta penalty ...).
 
+## v2: acoustic SNR sweep (operator go 2026-11-20; criteria fixed before any v2 run)
+Why: v1 P2 failed; unknown whether the toy was too noisy (cluster-mean sd 0.5 vs noise sd 1) or Delta cannot learn
+acoustic structure. Same model, task, kappa/tau_e = 5, seeds, scenarios as v1. Only the cluster-mean sd s varies.
+- Grid: s in {0.5, 1, 2, 4} (noise sd 1). mu in {0, 1e-2, 0.1, 1, 1e3} + prior-only. 5 seeds.
+- Q1 mechanism: at some s, v1's P2 holds (disagree, mu = 0: JS(Pi,Pi_A) < JS(Pi,Pi_G) AND loss < prior-only),
+  seed means. Report the smallest such s.
+- Q2 dose-response: disagree, mu = 0, JS(Pi,Pi_A) decreases with s (Spearman over s, seed means, <= -0.8).
+- Q3 v1's P1 and P3 hold at every s.
+Reading: Q1 & Q2 & Q3 -> v1 failure was the scenario; proceed to plan full E-DAIC tests. Q1 fails -> Delta does not
+learn acoustic structure even with strong signal -> mathematical fix in r12 before E-DAIC.
+- [x] T4 v2 sweep + report `TRAMIL/Results/poc_graph_penalty_v2.md` (+ .json) (route: delegated writer)
+  - Code: `make_data(..., s=0.5)` (default reproduces v1, fingerprint test) + `run_v2()` in the same module.
+    TDD: RED (TypeError, 2 new tests) -> GREEN. Metric bug found by the first v2 run: `row_js` gave NaN when Pi and
+    Pi_A both have exact zeros (mu = 0, s >= 2); RED test -> guard -> GREEN; full sweep rerun, non-NaN cells
+    bit-identical. Tests: module 8 passed; full suite 95 passed, 3 skipped. ~30 min CPU per sweep.
+  - Readings stated before running (in the report header): P1 Spearman over the 5-point v2 mu grid per seed, then
+    averaged; P3 over every v2 mu; Q2 Spearman over 4 s values of seed-mean JS(Pi,Pi_A).
+  - Q1 FAIL: P2 holds at no s. Disagree, mu = 0, JS A vs G / loss vs prior-only: s=0.5 0.436 vs 0.296 / 1.081 vs
+    1.016; s=1 0.434 vs 0.336 / 0.310 vs 0.305; s=2 0.540 vs 0.470 / 0.137 vs 0.139; s=4 0.627 vs 0.568 / 0.1128 vs 0.1130.
+  - Q2 FAIL: JS(Pi,Pi_A) per s [0.436, 0.434, 0.540, 0.627], Spearman +0.800 (needs <= -0.8; wrong direction).
+  - Q3 FAIL: P1 passes at every s; P3 fails at s=1 (0.2308 > 0.2015) and s=2 (0.1449 > 0.1438).
+  - Reading (pre-registered): Q1 fails -> Delta does not learn acoustic structure even with strong signal ->
+    mathematical fix in r12 before E-DAIC. Observation: unpenalized Delta grows with s (delta_rms 5 -> 23) and
+    sharpens Pi without acoustic alignment; prior-only loss falls with s, so aggregation carries little task signal.
+  - Commit: see below.
+
 ## Next step
-T3: operator reads the report and decides whether P2's failure (Delta does not learn acoustic structure on this toy)
+v2 (T4): Q1/Q2/Q3 all FAIL; the pre-registered reading routes to an r12 mathematical fix before E-DAIC. Operator decides.
+
+v1 (historical): T3: operator reads the report and decides whether P2's failure (Delta does not learn acoustic structure on this toy)
 blocks full E-DAIC tests. Criteria were not changed after the run.
 
 Engram mirror: pending (session bound to project `loq`, write to `tcamil_extension` refused).
