@@ -25,3 +25,11 @@ def test_fit_unit_never_touches_test_instances_and_aggregates_per_subject():
     for agg in ("mean", "max", "top3"):
         assert r["test"][agg].shape == (len(test_idx),) and r["train"][agg].shape == (len(train_idx),)
         assert roc_auc_score(y[test_idx], r["test"][agg]) > 0.8
+
+
+def test_bag_svm_permuted_run_is_deterministic_and_differs_from_unpermuted():
+    items = _items(30)
+    kw = dict(repetitions=1, n_folds=3)
+    obs = d.bag_svm_val_auroc(items, seed=None, **kw)
+    p1, p2 = d.bag_svm_val_auroc(items, seed=5, **kw), d.bag_svm_val_auroc(items, seed=5, **kw)
+    assert p1 == p2 and p1 != obs and obs > 0.8

@@ -83,6 +83,21 @@ def run(items, repetitions=3, n_folds=5, grid=GRID):
             "n_subjects": len(items), "units": repetitions * n_folds}
 
 
+def bag_svm_val_auroc(items, seed=None, repetitions=3, n_folds=5):
+    """Mean val AUROC of the bag_svm arm over the outer units. seed=None: true labels; else subject labels are
+    permuted once with that seed (outer folds stay those of the true labels; inner-CV selection is unchanged)."""
+    y = np.array([it["y"] for it in items])
+    yl = y if seed is None else np.random.default_rng(seed).permutation(y)
+    aucs = []
+    for r in range(repetitions):
+        for k, te in enumerate(validation.outer_splits(y, r, n_folds)):
+            tr = np.setdiff1d(np.arange(len(items)), te)
+            pipe = comparators.fit_svm([items[i]["X"] for i in tr], yl[tr], validation.INNER_SEED + k)
+            S = np.stack([comparators.bag_stats(items[i]["X"]) for i in te])
+            aucs.append(roc_auc_score(yl[te], pipe.decision_function(S)))
+    return float(np.mean(aucs))
+
+
 AGGS_NAMES = tuple(f"instance_{a}" for a in AGGS)
 
 
