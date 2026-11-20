@@ -69,7 +69,7 @@ learn acoustic structure even with strong signal -> mathematical fix in r12 befo
   - Reading (pre-registered): Q1 fails -> Delta does not learn acoustic structure even with strong signal ->
     mathematical fix in r12 before E-DAIC. Observation: unpenalized Delta grows with s (delta_rms 5 -> 23) and
     sharpens Pi without acoustic alignment; prior-only loss falls with s, so aggregation carries little task signal.
-  - Commit: see below.
+  - Commit: 0e5fb92 (feat(poc): add acoustic SNR sweep (v2) ...).
 
 ## Next step
 v2 (T4): Q1/Q2/Q3 all FAIL; the pre-registered reading routes to an r12 mathematical fix before E-DAIC. Operator decides.
