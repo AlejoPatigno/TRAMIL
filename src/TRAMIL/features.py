@@ -32,6 +32,9 @@ SR = 16000
 WAVLM_MODEL = "microsoft/wavlm-base-plus"
 WAVLM_LAYER = 6  # hidden_states[0] is the CNN/embedding output
 WAVLM_MIN = 400  # one WavLM frame (25 ms at 16 kHz)
+# Longest single forward pass. Self-attention memory grows with T^2: one ~180 s answer asked a T4 for 3.87 GiB in one
+# softmax (OOM, 2026-11-20). 20 s is on the order of WavLM's pretraining crops; longer segments run in equal windows.
+WAVLM_WINDOW = 20 * SR
 TEXT_MODEL = "sentence-transformers/all-mpnet-base-v2"
 # The six temporal descriptors of eGeMAPSv02 plus the equivalent sound level (Section 18.9).
 TEMPORAL = (
@@ -129,17 +132,23 @@ def wavlm_vector(x, sr, model, extractor):
     """Frozen WavLM layer-6 hidden states mean-pooled over time: (hidden_size,) float32; 768-d for base+.
 
     One segment per forward pass: the base model has no attention mask, so batching padded segments would change
-    the result. Segments below one frame are zero-padded to WAVLM_MIN samples."""
+    the result. Segments below one frame are zero-padded to WAVLM_MIN samples. Segments longer than WAVLM_WINDOW are
+    split into near-equal windows (each > WAVLM_WINDOW / 2), run one at a time, and pooled over all their frames; the
+    extractor normalization is applied once to the whole segment."""
     import torch
 
     assert sr == SR
     x = np.asarray(x, dtype=np.float32)
     if len(x) < WAVLM_MIN:
         x = np.concatenate([x, np.zeros(WAVLM_MIN - len(x), np.float32)])
-    inp = torch.from_numpy(extractor(x, sampling_rate=sr, return_tensors="np")["input_values"])
+    full = extractor(x, sampling_rate=sr, return_tensors="np")["input_values"][0]
+    device = next(model.parameters()).device
+    frames = []
     with torch.no_grad():
-        hs = model.eval()(inp.to(next(model.parameters()).device), output_hidden_states=True).hidden_states
-    return hs[WAVLM_LAYER].mean(1)[0].float().cpu().numpy().astype(np.float32)
+        for chunk in np.array_split(full, -(-len(full) // WAVLM_WINDOW)):
+            inp = torch.from_numpy(np.ascontiguousarray(chunk)[None]).to(device)
+            frames.append(model.eval()(inp, output_hidden_states=True).hidden_states[WAVLM_LAYER][0].float().cpu())
+    return torch.cat(frames).mean(0).numpy().astype(np.float32)
 
 
 _wl = None

@@ -50,6 +50,42 @@ def test_wavlm_vector_is_layer_6_mean_over_time(tiny):
     assert not np.allclose(v, hs[8].mean(1)[0].numpy(), atol=1e-3)  # not the last layer
 
 
+def test_long_segments_run_in_equal_windows_and_pool_all_frames(tiny, monkeypatch):
+    """A segment longer than WAVLM_WINDOW is split into near-equal windows (bounded attention memory); the vector is
+    the layer-6 mean over every frame of every window, with the feature extractor applied once to the whole segment."""
+    model, ext = tiny
+    monkeypatch.setattr(features, "WAVLM_WINDOW", SR)  # 1 s windows
+    x = _x(2.5, seed=5)
+    seen = []
+    orig = model.forward
+
+    def spy(input_values, **kw):
+        seen.append(input_values.shape[-1])
+        return orig(input_values, **kw)
+
+    monkeypatch.setattr(model, "forward", spy)
+    v = features.wavlm_vector(x, SR, model, ext)
+    assert len(seen) == 3 and max(seen) <= SR and min(seen) >= SR // 2
+    monkeypatch.setattr(model, "forward", orig)
+    full = ext(x, sampling_rate=SR, return_tensors="np")["input_values"][0]
+    frames = []
+    with torch.no_grad():
+        for c in np.array_split(full, 3):
+            frames.append(model(torch.from_numpy(c[None]), output_hidden_states=True).hidden_states[6][0])
+    assert np.allclose(v, torch.cat(frames).mean(0).numpy(), atol=1e-5)
+
+
+def test_segments_within_one_window_are_unchanged(tiny, monkeypatch):
+    model, ext = tiny
+    x = _x(1.0, seed=3)
+    monkeypatch.setattr(features, "WAVLM_WINDOW", SR)
+    v = features.wavlm_vector(x, SR, model, ext)
+    inp = torch.from_numpy(ext(x, sampling_rate=SR, return_tensors="np")["input_values"])
+    with torch.no_grad():
+        ref = model(inp, output_hidden_states=True).hidden_states[6].mean(1)[0].numpy()
+    assert np.allclose(v, ref, atol=1e-5)
+
+
 def test_short_segments_are_zero_padded_to_one_wavlm_frame(tiny):
     model, ext = tiny
     short = _x(0.005)  # 80 samples, below one frame
