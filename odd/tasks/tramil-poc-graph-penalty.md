@@ -43,7 +43,7 @@ TDD strict. Runner: `.venv/Scripts/python.exe -m pytest -q --basetemp=.pytest_tm
   - P3 PASS: agree, max loss over mu 0.5259 <= 1.05 x prior-only 0.5361.
   - Overall: FAIL (P2). At mu = 0 the learned Delta moves Pi away from the prior but not toward the acoustic
     clusters (JS to A unchanged vs prior-only) and overfits; the penalty pull itself works as intended.
-- Commit: see `git log` (feat: synthetic PoC ...); hash recorded in the follow-up docs commit.
+- Commit: 82db92f (feat: synthetic PoC of the Delta penalty ...).
 
 ## Next step
 T3: operator reads the report and decides whether P2's failure (Delta does not learn acoustic structure on this toy)
