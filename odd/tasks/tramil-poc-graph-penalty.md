@@ -138,6 +138,7 @@ Pass iff gates valid and F1', F2, F2b, F3, F4 hold (seed means). Pass -> experim
   - F1' FAIL: mu* test MSE 1.7477 < prior-only 1.7808 and acoustic-only 1.7734, but NOT < constant 1.2525.
   - F2 PASS (0.0478 > 0.0280). F2b FAIL (0.0478 vs uniform-row 0.1232). F3 PASS (Spearman -1.000).
     F4 PASS (max|Delta| 4.9836 < 5, band 40/40).
+  - Commit: ff07299 (feat(poc): add v3b validity gate ...).
   - Overall: FAIL. Observation: the scenario is learnable by the neighbour oracle (NB 0.65 vs constant 1.25), but
     ORACLE-SEG, the trained model without the graph, is itself worse than the constant (1.78), so V2 passed because
     the trained readout fails, not because aggregation is the bottleneck. The learned pipeline (encoder + attention
