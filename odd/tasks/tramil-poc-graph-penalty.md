@@ -71,7 +71,46 @@ learn acoustic structure even with strong signal -> mathematical fix in r12 befo
     sharpens Pi without acoustic alignment; prior-only loss falls with s, so aggregation carries little task signal.
   - Commit: 0e5fb92 (feat(poc): add acoustic SNR sweep (v2) ...).
 
+## v3: favorable-state existence proof of the r12 mechanism (operator go 2026-11-20; fixed before any v3 run)
+Existence proof only: passing says nothing about E-DAIC performance; failing means the r12 mechanism is broken in
+its best case. Model = r12 exactly: Delta = (1/tau_a) cos(bag-centered W_a h rows), W_a 32x32, masked diagonal,
+same eps as Ec. 70; Gamma = Delta + (kappa/tau_e) G; Pi row softmax; H~ = H + tanh(Pi H W_g); alignment penalty
+mu ||(G^a - G) ⊙ (11^T - I)||_F^2 / N^2 with gradient to W_a only (Ec. 71, 77, 104-106 of r12).
+Favorable scenario: s = 0.5, noise sd 1 (single segment weak, neighbour average informative); text/acoustic latent
+agree on 75% of segments; cluster means in 4 of 16 dims, 12 nuisance dims; 256 train / 64 val / 64 test bags,
+N ~ U{20..60}; each bag has 8 item severities, segments of item j carry noisy signal of severity j; item heads + MSE.
+PoC settings (not proposal values): 1/tau_a = kappa/tau_e = 5; mu in {0, 0.01, 0.1, 1, 10, 1e3}; 5 seeds;
+mu* chosen on val, all criteria on test.
+- F1 combination: test loss at mu* < prior-only (Delta = 0) AND < acoustic-only (kappa = 0).
+- F2 correction: on the 25% disagreeing segments, row mass of Pi(mu*) on true acoustic neighbours > that of
+  prior-only Pi.
+- F3 alignment: ||G^a - G|| decreases with mu (Spearman <= -0.9, seed means).
+- F4 bounded: |Delta| < 1/tau_a and Pi_ik within the Ec. 105 band, checked numerically.
+Pass iff F1-F4 (seed means). Pass -> experiments protocol; fail -> revise mechanism before any real run.
+- [x] T5 v3 favorable-state run + report `TRAMIL/Results/poc_graph_penalty_v3.md` (+ .json) (route: delegated writer)
+  - Code: sibling module `src/TRAMIL/poc_graph_penalty_v3.py` (reuses `prior_graph`/centering and SEEDS from v1; v1/v2
+    untouched, fingerprint test still green). Tests in `tests/test_poc_graph_penalty.py` (+7). TDD: RED (ImportError on
+    collection) -> GREEN. Module 15 passed; full suite 102 passed, 3 skipped. ~35 min CPU.
+  - Readings written to the report header (and to disk) before the run: toy encoder 16->32 ReLU; severities uniform
+    {0..3}, beta = 0.5 along the cluster-mean direction; readout = learned per-item attention pool (W_o = 0 init) +
+    item heads, prior only via G; Adam lr 1e-2, 40 epochs (v1 loop); acoustic-only uses mu = 0; F2 = mass on k != i
+    with same z_ac, pooled over disagreeing test segments; F3 Spearman over 6 mu of seed means; F4 per arm gamma,
+    evaluated in float64 (float32 cannot resolve eps = 1e-8).
+  - F1 PASS: mu* per seed [10, 0, 1, 1, 0.1]; test MSE 1.7477 < prior-only 1.7808 and < acoustic-only 1.7734.
+  - F2 PASS: neighbour mass on disagreeing segments 0.0478 (mu*) > 0.0280 (prior-only).
+  - F3 PASS: ||G^a - G|| 0.558 -> 0.410 over mu, Spearman -1.000.
+  - F4 PASS: max|Delta| 4.9836 < 5, diag 0, Ec. 105 band in 40/40 runs.
+  - Overall: PASS (pre-registered reading -> experiments protocol). Post-hoc caveats (not criteria, in the report):
+    every arm's test MSE (1.69-1.78) is worse than the constant training-mean predictor (1.25), F1 paired margins
+    change sign across seeds (3/5 vs prior-only, 4/5 vs acoustic-only), and F2 mass at mu* stays below a uniform
+    row (0.120); acoustic-only reaches 0.162. The task head does not learn; the pass rests on graph quantities.
+  - Run-time fix: md write failed on Windows cp1252 (U+2016); added utf-8 encoding and regenerated the md from the
+    saved JSON (verdicts recomputed and asserted identical); no rerun.
+
 ## Next step
+v3 (T5): F1-F4 PASS (existence proof); post-hoc, no arm beats a constant predictor on the item task. Operator decides
+whether to proceed to the experiments protocol or first make the toy task learnable.
+
 v2 (T4): Q1/Q2/Q3 all FAIL; the pre-registered reading routes to an r12 mathematical fix before E-DAIC. Operator decides.
 
 v1 (historical): T3: operator reads the report and decides whether P2's failure (Delta does not learn acoustic structure on this toy)
