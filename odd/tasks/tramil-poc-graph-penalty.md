@@ -108,7 +108,45 @@ Pass iff F1-F4 (seed means). Pass -> experiments protocol; fail -> revise mechan
   - Run-time fix: md write failed on Windows cp1252 (U+2016); added utf-8 encoding and regenerated the md from the
     saved JSON (verdicts recomputed and asserted identical); no rerun.
 
+## v3b: favorable state with a validity gate (operator go 2026-11-20; fixed before any v3b run)
+Why: v3 passed F1-F4 formally but no arm beat the constant predictor (test MSE 1.69-1.78 vs 1.25) and F2 mass was
+below a uniform row; the "favorable" scenario was not learnable. Same model, arms, settings, seeds, splits and
+F1-F4 definitions as v3. Changes:
+- Signal amplitude a (segment carries a*(severity-1.5) along its acoustic cluster direction; v3 had a = 0.5) and
+  cluster-mean scale are calibrated ONLY with oracles, never with model arms: a in {0.5, 1, 2, 4}, take the
+  smallest a passing both gates on val, then run all arms at that a.
+- Oracles (linear item heads fit on train): ORACLE-NB = mean of segment features over true acoustic same-item
+  neighbours, per item; ORACLE-SEG = no aggregation (each segment alone, attention pool without graph, H~ = H).
+- Gate V1 learnable: ORACLE-NB test MSE <= 0.8 x constant (training item mean) MSE.
+- Gate V2 aggregation needed: ORACLE-NB test MSE <= 0.9 x ORACLE-SEG test MSE.
+  If no a passes both gates: run is INVALID, report it, evaluate nothing.
+- F1' = v3 F1 plus: test MSE at mu* < constant predictor.
+- F2b added: F2 mass at mu* > uniform-row expectation (mean over disagreeing segments of
+  (#true acoustic neighbours)/(N-1)).
+Pass iff gates valid and F1', F2, F2b, F3, F4 hold (seed means). Pass -> experiments protocol.
+- [x] T6 v3b run + report `TRAMIL/Results/poc_graph_penalty_v3b.md` (+ .json) (route: delegated writer)
+  - Code: same module `src/TRAMIL/poc_graph_penalty_v3.py` (`a` parameter, default 0.5 = v3; `graph=False` path for
+    ORACLE-SEG; oracles, gate, F1'/F2b, `run_v3b`). Tests +6 in `tests/test_poc_graph_penalty.py`. TDD: RED (6 failed:
+    missing names/args) -> GREEN; two test-side fixes (absent item is unobservable in the noiseless NB check;
+    constant fake ||G^a-G|| gave NaN Spearman) and an rcond on the NB least squares (float32 rounding made the
+    noiseless design spuriously rank 5). Module 21 passed; full suite 108 passed, 3 skipped. ~45 min CPU.
+  - Readings in the report header before the run: gates decided on VAL seed means (spec wording "test MSE" read as
+    the same ratios on val; test shown only); only a calibrated (cluster sd stays 0.5); NB = per-item mean of raw X
+    over z_ac = j, OLS head per item; SEG = v3 model with H~ = H trained by the v3 loop; uniform row uses N - 1.
+  - Gate (val, NB/const, NB/SEG): a=0.5 0.540/0.394; a=1 0.219/0.235; a=2 0.072/0.116; a=4 0.027/0.128 -> all pass;
+    chosen a = 0.5 (= v3; arm numbers bit-identical to v3, reproducibility confirmed).
+  - F1' FAIL: mu* test MSE 1.7477 < prior-only 1.7808 and acoustic-only 1.7734, but NOT < constant 1.2525.
+  - F2 PASS (0.0478 > 0.0280). F2b FAIL (0.0478 vs uniform-row 0.1232). F3 PASS (Spearman -1.000).
+    F4 PASS (max|Delta| 4.9836 < 5, band 40/40).
+  - Overall: FAIL. Observation: the scenario is learnable by the neighbour oracle (NB 0.65 vs constant 1.25), but
+    ORACLE-SEG, the trained model without the graph, is itself worse than the constant (1.78), so V2 passed because
+    the trained readout fails, not because aggregation is the bottleneck. The learned pipeline (encoder + attention
+    pool + heads, Adam lr 1e-2, 40 epochs), not only the graph residual, fails to learn the item task.
+
 ## Next step
+v3b (T6): FAIL (F1' vs constant, F2b vs uniform); gate chose a = 0.5. Even the graph-free trained model is worse
+than a constant, so the training/readout setup fails before the graph mechanism can be judged. Operator decides.
+
 v3 (T5): F1-F4 PASS (existence proof); post-hoc, no arm beats a constant predictor on the item task. Operator decides
 whether to proceed to the experiments protocol or first make the toy task learnable.
 

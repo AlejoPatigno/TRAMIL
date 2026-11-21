@@ -67,7 +67,7 @@ def cluster_means(seed):
     return means
 
 
-def make_data_v3(seed, n_bags, split, noise=1.0):
+def make_data_v3(seed, n_bags, split, noise=1.0, a=BETA):
     means = cluster_means(seed)
     u = means / np.linalg.norm(means, axis=1, keepdims=True)
     rng = np.random.default_rng([seed, 3, split])  # stream 3: disjoint from the v1/v2 scenario streams 0..2
@@ -79,7 +79,7 @@ def make_data_v3(seed, n_bags, split, noise=1.0):
         idx = rng.choice(n, round(DISAGREE * n), replace=False)
         zt[idx] = (za[idx] + rng.integers(1, J, len(idx))) % J
         s = rng.integers(0, 4, J)
-        X = means[za] + BETA * (s[za] - 1.5)[:, None] * u[za] + noise * rng.standard_normal((n, DX))
+        X = means[za] + a * (s[za] - 1.5)[:, None] * u[za] + noise * rng.standard_normal((n, DX))
         R = torch.tensor(np.clip(0.6 + 0.03 * np.eye(J)[zt] + 0.005 * rng.standard_normal((n, J)), 0, 1),
                          dtype=torch.float32)
         bags.append(dict(X=torch.tensor(X, dtype=torch.float32), R=R, G=prior_graph(R), s=torch.tensor(s),
@@ -103,8 +103,11 @@ class ModelV3(nn.Module):
     def delta(self, H):
         return INV_TAU_A * prior_graph(self.W_a(H)) * offdiag(len(H), H.dtype)
 
-    def forward(self, X, G, kappa_tau=KAPPA_TAU, prior_only=False):
+    def forward(self, X, G, kappa_tau=KAPPA_TAU, prior_only=False, graph=True):
         H = torch.relu(self.enc(X))
+        if not graph:  # v3b ORACLE-SEG: no neighbour aggregation, H~ = H
+            A = torch.softmax(self.W_o(H), dim=0)
+            return (self.head.weight * (A.T @ H)).sum(1) + self.head.bias, None, None, H
         Delta = torch.zeros(len(H), len(H), dtype=H.dtype) if prior_only else self.delta(H)
         Pi = torch.softmax(Delta + kappa_tau * G, dim=1)
         Ht = H + torch.tanh(self.W_g(Pi @ H))
@@ -116,7 +119,7 @@ class ModelV3(nn.Module):
         return ((Ga - G) * offdiag(len(H), H.dtype)).pow(2).sum() / len(H) ** 2
 
 
-def train_v3(bags, mu, kappa_tau=KAPPA_TAU, prior_only=False, seed=0, epochs=40, lr=1e-2, batch=8):
+def train_v3(bags, mu, kappa_tau=KAPPA_TAU, prior_only=False, seed=0, epochs=40, lr=1e-2, batch=8, graph=True):
     torch.manual_seed(seed)
     model = ModelV3()
     opt = torch.optim.Adam(model.parameters(), lr=lr)
@@ -126,7 +129,7 @@ def train_v3(bags, mu, kappa_tau=KAPPA_TAU, prior_only=False, seed=0, epochs=40,
             loss = 0.0
             for i in order[st:st + batch]:
                 b = bags[i]
-                s_hat, _, _, H = model(b["X"], b["G"], kappa_tau, prior_only)
+                s_hat, _, _, H = model(b["X"], b["G"], kappa_tau, prior_only, graph)
                 loss = loss + (s_hat - b["s"]).pow(2).mean()
                 if mu:
                     loss = loss + mu * model.alignment_penalty(H, b["G"])
@@ -247,5 +250,198 @@ def run_v3(out_dir=OUT):
     return ver
 
 
+
+# ---------------- v3b: favorable state with a validity gate ----------------
+A_GRID = [0.5, 1.0, 2.0, 4.0]
+
+READINGS_V3B = """Readings of the pre-registered v3b spec, fixed before any v3b run (v3 readings above still apply):
+- Gates are evaluated on VAL (seed means over 5 seeds), as the spec selects "the smallest a passing both gates on
+  val"; the spec's V1/V2 wording says "test MSE", read as the same ratios computed on val for the decision. Test
+  values of the gate quantities are reported alongside and decide nothing.
+- Only a is calibrated (grid {0.5, 1, 2, 4}); the cluster-mean sd stays s = 0.5 (no grid was given for it).
+- Constant predictor: per-item training mean of the severities, applied to every bag.
+- ORACLE-NB: per bag and item j, the mean of the raw segment features X (16 dims) over segments with z_ac = j
+  (true acoustic same-item neighbours; zero vector when the item has no segment in the bag); one ordinary
+  least-squares linear head (with intercept) per item, fit on train in closed form (gelsd, relative rcond 1e-6,
+  so float32 rounding directions of a noiseless design are not fitted; it does not bind on noisy data).
+- ORACLE-SEG: the v3 model with the graph removed (H~ = H; encoder, attention pool W_o and item heads only),
+  trained on train with the v3 loop (Adam lr 1e-2, 40 epochs, batch 8, same seed). It knows no neighbours.
+- V1: NB <= 0.8 x constant; V2: NB <= 0.9 x SEG (both inclusive). No passing a -> INVALID; no model arm is trained.
+- Model arms are trained only at the chosen a; the oracles never see a model arm and a model arm never informs a.
+- F1' = v3 F1 and test MSE at mu* < constant test MSE (seed means). F2b: F2 mass at mu* > uniform-row expectation
+  = mean over disagreeing test segments (pooled) of #(k != i with z_ac(k) = z_ac(i)) / (N - 1), seed mean.
+- Overall: INVALID if no a passes; else PASS iff F1', F2, F2b, F3, F4 (seed means)."""
+
+
+def item_mse(pred_fn, bags):
+    return float(np.mean([(pred_fn(b) - b["s"]).pow(2).mean().item() for b in bags]))
+
+
+def constant_mse(train_bags, bags):
+    m = torch.stack([b["s"] for b in train_bags]).double().mean(0)
+    return item_mse(lambda b: m, bags)
+
+
+def nb_features(b):
+    X, za = b["X"], b["z_ac"]
+    return torch.stack([X[za == j].mean(0) if (za == j).any() else torch.zeros(X.shape[1]) for j in range(J)])
+
+
+def _nb_design(b):
+    return torch.cat([nb_features(b).double(), torch.ones(J, 1, dtype=torch.float64)], 1)  # J x (DX + 1)
+
+
+def fit_oracle_nb(bags):
+    Z = torch.stack([_nb_design(b) for b in bags])  # B x J x (DX + 1)
+    S = torch.stack([b["s"] for b in bags]).double()
+    return torch.stack([torch.linalg.lstsq(Z[:, j], S[:, j:j + 1], rcond=1e-6, driver="gelsd").solution[:, 0] for j in range(J)])
+
+
+def oracle_nb_mse(W, bags):
+    return item_mse(lambda b: (_nb_design(b) * W).sum(1), bags)
+
+
+@torch.no_grad()
+def oracle_seg_mse(model, bags):
+    return item_mse(lambda b: model(b["X"], b["G"], graph=False)[0].double(), bags)
+
+
+def uniform_mass_dis(bags):
+    vals = []
+    for b in bags:
+        za, n = b["z_ac"], len(b["z_ac"])
+        nbrs = (za[:, None] == za[None, :]).sum(1) - 1
+        vals.append((nbrs.double() / (n - 1))[b["z_text"] != za])
+    return torch.cat(vals).mean().item()
+
+
+def choose_a(gates):
+    for a in sorted(gates):
+        g = gates[a]
+        if g["nb"] <= 0.8 * g["const"] and g["nb"] <= 0.9 * g["seg"]:
+            return a
+    return None
+
+
+def _verdicts_v3b(res, mu_grid=MU_GRID_V3, a=None):
+    ver = _verdicts_v3(res, mu_grid)
+    f1p = dict(loss_mu_star=ver["F1"]["loss_mu_star"], loss_constant=_mean(res["constant"], "loss"))
+    f1p["pass"] = bool(ver["F1"]["pass"] and f1p["loss_mu_star"] < f1p["loss_constant"])
+    f2b = dict(nbr_mass_mu_star=ver["F2"]["nbr_mass_mu_star"], uniform_mass_dis=float(np.mean(res["uniform_mass_dis"])))
+    f2b["pass"] = bool(f2b["nbr_mass_mu_star"] > f2b["uniform_mass_dis"])
+    ok = f1p["pass"] and ver["F2"]["pass"] and f2b["pass"] and ver["F3"]["pass"] and ver["F4"]["pass"]
+    return dict(ver, F1p=f1p, F2b=f2b, a=a, overall="PASS" if ok else "FAIL")
+
+
+def _gate_lines(gates, chosen):
+    lines = ["## Validity gate (oracles only; decided on val, seed means; test shown, decides nothing)", "",
+             "| a | constant val | ORACLE-NB val | ORACLE-SEG val | NB/const (V1 <= 0.8) | NB/SEG (V2 <= 0.9) | V1 | V2 "
+             "| constant test | NB test | SEG test |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for a, d in gates.items():
+        v, te = d["val"], d["test"]
+        r1, r2 = v["nb"] / v["const"], v["nb"] / v["seg"]
+        lines.append(f"| {a:g} | {v['const']:.4f} | {v['nb']:.4f} | {v['seg']:.4f} | {r1:.3f} | {r2:.3f} | "
+                     f"{'pass' if r1 <= 0.8 else 'fail'} | {'pass' if r2 <= 0.9 else 'fail'} | {te['const']:.4f} | "
+                     f"{te['nb']:.4f} | {te['seg']:.4f} |")
+    lines += ["", f"**Chosen a: {chosen if chosen is not None else 'none -> INVALID'}**", ""]
+    return lines
+
+
+def _markdown_v3b(gates, chosen, res=None, ver=None):
+    lines = ["# Synthetic PoC v3b: favorable state with a validity gate (r12 bounded acoustic residual)", "",
+             "**Existence proof only.** Passing says nothing about E-DAIC performance. Synthetic data; PoC settings are "
+             "not proposal values.", "", READINGS, "", READINGS_V3B, ""] + _gate_lines(gates, chosen)
+    if res is None:
+        return "\n".join(lines + ["**Overall: INVALID** (no a passes V1 and V2; no model arm was trained or evaluated)", ""])
+
+    def cell(runs, k):
+        return f"{_mean(runs, k):.4f} +- {np.std([r[k] for r in runs], ddof=1):.4f}"
+
+    star = [res["full"][str(mu)][s] for s, mu in enumerate(ver["F1"]["mu_star"])]
+    arms = [(f"mu = {mu:g}", res["full"][str(mu)]) for mu in MU_GRID_V3] + [
+        ("mu* (val-selected)", star), ("prior-only (Delta = 0)", res["prior_only"]),
+        ("acoustic-only (kappa = 0)", res["acoustic_only"])]
+    lines += [f"## Per-arm results at a = {chosen:g} (test bags, mean +- sd over 5 seeds)", "",
+              "| arm | test loss (item MSE) | val loss | F2 nbr mass, disagreeing | ‖G^a − G‖ | max\\|Delta\\| | Pi band ok |",
+              "|---|---|---|---|---|---|---|"]
+    for name, runs in arms:
+        lines.append(f"| {name} | {cell(runs, 'loss')} | {cell(runs, 'val_loss')} | {cell(runs, 'nbr_mass_dis')} | "
+                     f"{cell(runs, 'ga_dist')} | {max(r['max_abs_delta'] for r in runs):.4f} | "
+                     f"{sum(r['band_ok'] for r in runs)}/{len(runs)} |")
+    for name, key in (("constant (train item mean)", "constant"), ("ORACLE-NB", "oracle_nb"), ("ORACLE-SEG", "oracle_seg")):
+        lines.append(f"| {name} | {cell(res[key], 'loss')} | {cell(res[key], 'val_loss')} | - | - | - | - |")
+    u = res["uniform_mass_dis"]
+    lines.append(f"| uniform row (F2b reference) | - | - | {np.mean(u):.4f} +- {np.std(u, ddof=1):.4f} | - | - | - |")
+    f1, f1p, f2, f2b, f3, f4 = (ver[k] for k in ("F1", "F1p", "F2", "F2b", "F3", "F4"))
+    pf = lambda v: "PASS" if v["pass"] else "FAIL"  # noqa: E731
+    lines += ["", "‖G^a − G‖ of prior-only uses the untrained W_a (not part of any criterion).", "",
+              "## Verdicts (pre-registered F1', F2, F2b, F3, F4)", "",
+              f"- F1' combination: mu* per seed {f1['mu_star']}; test loss at mu* {f1['loss_mu_star']:.4f} vs prior-only "
+              f"{f1['loss_prior_only']:.4f}, acoustic-only {f1['loss_acoustic_only']:.4f} and constant "
+              f"{f1p['loss_constant']:.4f} (needs below all three). **{pf(f1p)}**",
+              f"- F2 correction: neighbour mass on disagreeing segments at mu* {f2['nbr_mass_mu_star']:.4f} vs prior-only "
+              f"{f2['nbr_mass_prior_only']:.4f} (needs higher). **{pf(f2)}**",
+              f"- F2b above uniform: {f2b['nbr_mass_mu_star']:.4f} vs uniform-row expectation {f2b['uniform_mass_dis']:.4f} "
+              f"(needs higher). **{pf(f2b)}**",
+              f"- F3 alignment: ‖G^a − G‖ per mu {[round(x, 4) for x in f3['ga_dist_per_mu']]}, Spearman "
+              f"{f3['spearman']:.3f} (needs <= -0.9). **{pf(f3)}**",
+              f"- F4 bounded: max|Delta| {f4['max_abs_delta']:.6f} < {f4['bound']:g}, max|diag Delta| "
+              f"{f4['delta_diag_max']:g}, Pi band holds in {f4['band_ok_runs']}/{f4['n_runs']} runs. **{pf(f4)}**",
+              "", f"**Overall: {ver['overall']}**", "", "Pre-registered reading: PASS -> experiments protocol.", ""]
+    return "\n".join(lines)
+
+
+def run_v3b(out_dir=OUT):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md, js = out_dir / "poc_graph_penalty_v3b.md", out_dir / "poc_graph_penalty_v3b.json"
+    md.write_text("# Synthetic PoC v3b (running)\n\n" + READINGS + "\n\n" + READINGS_V3B + "\n", encoding="utf-8")
+    gates, per_seed = {}, {}
+    for a in A_GRID:
+        rows = []
+        for seed in SEEDS:
+            tr, va, te = (make_data_v3(seed, n, split=k, a=a) for k, n in enumerate((N_TRAIN, N_VAL, N_TEST)))
+            W, seg = fit_oracle_nb(tr), train_v3(tr, 0.0, seed=seed, graph=False)
+            rows.append({sp: dict(const=constant_mse(tr, bs), nb=oracle_nb_mse(W, bs), seg=oracle_seg_mse(seg, bs))
+                         for sp, bs in (("val", va), ("test", te))})
+            print("gate a", a, "seed", seed, flush=True)
+        per_seed[a] = rows
+        gates[a] = {sp: {k: float(np.mean([r[sp][k] for r in rows])) for k in ("const", "nb", "seg")}
+                    for sp in ("val", "test")}
+    chosen = choose_a({a: g["val"] for a, g in gates.items()})
+    out = dict(settings=dict(a_grid=A_GRID, inv_tau_a=INV_TAU_A, kappa_tau=KAPPA_TAU, mu_grid=MU_GRID_V3,
+                             seeds=list(SEEDS), n_train=N_TRAIN, n_val=N_VAL, n_test=N_TEST, s_cluster=S_CLUSTER,
+                             readings=READINGS + "\n" + READINGS_V3B,
+                             note="PoC settings on synthetic data, not proposal values"),
+               gates={str(a): g for a, g in gates.items()}, gates_per_seed={str(a): r for a, r in per_seed.items()},
+               chosen_a=chosen)
+    if chosen is None:
+        out["verdicts"] = dict(overall="INVALID")
+        js.write_text(json.dumps(out, indent=2), encoding="utf-8")
+        md.write_text(_markdown_v3b(gates, None), encoding="utf-8")
+        return out["verdicts"]
+    res = dict(full={str(mu): [] for mu in MU_GRID_V3}, prior_only=[], acoustic_only=[], constant=[],
+               oracle_nb=[], oracle_seg=[], uniform_mass_dis=[])
+
+    def fit(tr, va, te, seed, mu, **kw):
+        model = train_v3(tr, mu, seed=seed, **kw)
+        return dict(val_loss=evaluate_v3(model, va, **kw)["loss"], **evaluate_v3(model, te, **kw))
+
+    for seed, row in zip(SEEDS, per_seed[chosen]):
+        tr, va, te = (make_data_v3(seed, n, split=k, a=chosen) for k, n in enumerate((N_TRAIN, N_VAL, N_TEST)))
+        for key, k in (("constant", "const"), ("oracle_nb", "nb"), ("oracle_seg", "seg")):
+            res[key].append(dict(loss=row["test"][k], val_loss=row["val"][k]))
+        res["uniform_mass_dis"].append(uniform_mass_dis(te))
+        for mu in MU_GRID_V3:
+            res["full"][str(mu)].append(fit(tr, va, te, seed, mu))
+        res["prior_only"].append(fit(tr, va, te, seed, 0.0, prior_only=True))
+        res["acoustic_only"].append(fit(tr, va, te, seed, 0.0, kappa_tau=0.0))
+        print("arms seed", seed, flush=True)
+    ver = _verdicts_v3b(res, a=chosen)
+    js.write_text(json.dumps(dict(out, results=res, verdicts=ver), indent=2), encoding="utf-8")
+    md.write_text(_markdown_v3b(gates, chosen, res, ver), encoding="utf-8")
+    return ver
+
+
 if __name__ == "__main__":
-    print(run_v3()["overall"])
+    import sys
+    print(run_v3b()["overall"] if "v3b" in sys.argv else run_v3()["overall"])

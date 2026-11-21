@@ -195,3 +195,74 @@ def test_v3_mu_star_is_chosen_on_val_and_criteria_use_test():
     assert abs(ver["F2"]["nbr_mass_mu_star"] - 0.7) < 1e-12
     assert abs(ver["F3"]["spearman"] + 1) < 1e-9 and ver["F3"]["pass"]
     assert ver["F4"]["pass"] and ver["overall"] == "FAIL"
+
+
+# ---- v3b: validity gate (oracles calibrate the signal amplitude a) ----
+def test_v3b_default_amplitude_reproduces_v3_and_a_scales_the_severity_signal():
+    for x, y in zip(v3.make_data_v3(2, 3, split=1), v3.make_data_v3(2, 3, split=1, a=v3.BETA)):
+        assert torch.equal(x["X"], y["X"])
+    means = v3.cluster_means(5)
+    u = means / np.linalg.norm(means, axis=1, keepdims=True)
+    for b in v3.make_data_v3(5, 3, split=0, noise=0.0, a=4.0):
+        za, s = b["z_ac"].numpy(), b["s"].numpy()
+        assert np.allclose(b["X"].numpy(), means[za] + 4.0 * (s[za] - 1.5)[:, None] * u[za], atol=1e-5)
+
+
+def test_v3b_oracle_nb_averages_true_acoustic_neighbours_per_item():
+    b = v3.make_data_v3(6, 1, split=0)[0]
+    F = v3.nb_features(b)
+    assert F.shape == (v3.J, v3.DX)
+    for j in range(v3.J):
+        members = b["z_ac"] == j
+        expected = b["X"][members].mean(0) if members.any() else torch.zeros(v3.DX)
+        assert torch.allclose(F[j], expected)
+    shuffled = dict(b, z_text=b["z_text"].flip(0), R=b["R"].flip(0))  # text side is ignored
+    assert torch.equal(v3.nb_features(shuffled), F)
+    full = lambda bags: [b for b in bags if len(set(b["z_ac"].tolist())) == v3.J]  # noqa: E731  absent item: unobservable
+    W = v3.fit_oracle_nb(full(v3.make_data_v3(6, 64, split=0, noise=0.0)))
+    assert v3.oracle_nb_mse(W, full(v3.make_data_v3(6, 16, split=1, noise=0.0))) < 1e-6  # noiseless: exact
+
+
+def test_v3b_oracle_seg_uses_no_graph_aggregation():
+    torch.manual_seed(7)
+    model = v3.ModelV3()
+    b = v3.make_data_v3(7, 1, split=0)[0]
+    out1 = model(b["X"], b["G"], graph=False)[0]
+    out2 = model(b["X"], -b["G"], graph=False)[0]
+    assert torch.equal(out1, out2)
+    out1.sum().backward()
+    assert model.W_a.weight.grad is None and model.W_g.weight.grad is None
+
+
+def test_v3b_gate_takes_the_smallest_passing_a_or_none():
+    g = lambda nb, seg, const: dict(nb=nb, seg=seg, const=const)  # noqa: E731
+    gates = {0.5: g(1.2, 1.25, 1.25), 1.0: g(0.9, 0.95, 1.25), 2.0: g(0.5, 0.9, 1.25), 4.0: g(0.1, 0.9, 1.25)}
+    assert v3.choose_a(gates) == 2.0  # 1.0 passes V1 (0.9 <= 1.0) but fails V2 (0.9 > 0.855)
+    assert v3.choose_a({1.0: g(1.0, 2.0, 1.25)}) == 1.0  # V1 boundary is inclusive
+    assert v3.choose_a({0.5: g(1.2, 1.25, 1.25), 4.0: g(0.9, 0.95, 1.0)}) is None
+
+
+def test_v3b_uniform_row_expectation():
+    b = dict(z_ac=torch.tensor([0, 0, 0, 1]), z_text=torch.tensor([0, 1, 0, 0]))
+    # disagreeing segments: 1 (2 neighbours of 3) and 3 (0 of 3)
+    assert abs(v3.uniform_mass_dis([b]) - (2 / 3 + 0) / 2) < 1e-12
+
+
+def test_v3b_verdicts_add_constant_and_uniform_comparisons():
+    def run(val, loss, mass, ga=0.1):
+        return dict(val_loss=val, loss=loss, nbr_mass_dis=mass, ga_dist=ga, max_abs_delta=1.0,
+                    delta_diag_max=0.0, band_ok=True)
+
+    res = {"full": {"0.0": [run(1.0, 1.0, 0.30, ga=0.3)], "1.0": [run(2.0, 0.5, 0.9)]},
+           "prior_only": [run(0, 1.2, 0.2)], "acoustic_only": [run(0, 1.1, 0.5)],
+           "constant": [dict(loss=0.9, val_loss=0.9)], "uniform_mass_dis": [0.25]}
+    ver = v3._verdicts_v3b(res, [0.0, 1.0], a=2.0)
+    assert ver["F1"]["pass"] and not ver["F1p"]["pass"] and ver["F1p"]["loss_constant"] == 0.9
+    assert ver["F2"]["pass"] and ver["F2b"]["pass"] and ver["F2b"]["uniform_mass_dis"] == 0.25
+    assert ver["overall"] == "FAIL" and ver["a"] == 2.0
+    res["constant"] = [dict(loss=1.05, val_loss=1.05)]
+    res["uniform_mass_dis"] = [0.35]
+    ver = v3._verdicts_v3b(res, [0.0, 1.0], a=2.0)
+    assert ver["F1p"]["pass"] and not ver["F2b"]["pass"] and ver["overall"] == "FAIL"
+    res["uniform_mass_dis"] = [0.2]
+    assert v3._verdicts_v3b(res, [0.0, 1.0], a=2.0)["overall"] == "PASS"
