@@ -104,6 +104,7 @@ Pass iff F1-F4 (seed means). Pass -> experiments protocol; fail -> revise mechan
     every arm's test MSE (1.69-1.78) is worse than the constant training-mean predictor (1.25), F1 paired margins
     change sign across seeds (3/5 vs prior-only, 4/5 vs acoustic-only), and F2 mass at mu* stays below a uniform
     row (0.120); acoustic-only reaches 0.162. The task head does not learn; the pass rests on graph quantities.
+  - Commit: e2db7f4 (feat(poc): add r12 favorable-state existence proof (v3) ...).
   - Run-time fix: md write failed on Windows cp1252 (U+2016); added utf-8 encoding and regenerated the md from the
     saved JSON (verdicts recomputed and asserted identical); no rerun.
 
