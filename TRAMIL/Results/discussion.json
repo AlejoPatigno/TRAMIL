@@ -1,0 +1,159 @@
+{
+  "schema": 1,
+  "stage": "poc",
+  "protocol": "experiments/experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v04.md",
+  "generated_at": "2026-11-19T04:33:10Z",
+  "summary": "Proof of concept of the residual semantic-prior bipartite MIL on E-DAIC. The pipeline runs end to end: the frozen eGeMAPS + mpnet feature cache was extracted on Kaggle for all 184 sessions, and E1 ran at its declared scale (3 repetitions x 5 folds x 3 seeds, up to 80 epochs) for the residual model, the learned-only control, ABMIL, Gated ABMIL and the SVM floor; Symptom-Guided was deferred. Every arm sits at chance (mean AUROC 0.451-0.474) and no paired difference is detectable; an SVM permutation null on the same partitions (mean 0.501, 5-95% 0.399-0.601) contains the observed 0.451. The 48-bag pilot (0.58-0.76) was small-sample noise. Only H1 was exercised, and it is inconclusive.",
+  "discussion_type": [
+    "comparative",
+    "failure-analysis"
+  ],
+  "metrics": [
+    {
+      "name": "AUROC of the seed ensemble per outer fold",
+      "role": "primary",
+      "why": "The protocol's primary metric for E1 (subject-level binary PHQ-8 >= 10)."
+    }
+  ],
+  "hypotheses": [
+    {
+      "id": "H1",
+      "experiment": "E1",
+      "statement": "with the same text access, the AUROC of the residual model is equivalent within 0.05 to Symptom-Guided cross-attention and to the text-aware learned-attention control.",
+      "metric": "AUROC (seed ensemble per outer fold)",
+      "test": "Two one-sided tests on Ec. 69 over 15 outer partitions, corrected resampled t (Ec. 63)",
+      "criterion": "H1 comparability is supported when, for both primary comparators, the Holm-adjusted 90% interval of Ec. 69 lies inside (-0.05, 0.05); it is refuted when either interval lies entirely below -0.05; any other outcome is reported as inconclusive. The posterior probability of the region [-0.05, 0.05] is reported for both comparators. The development DeLong interval is descriptive and does not enter the decision.",
+      "observed": "Residual 0.474, learned-only 0.455, ABMIL 0.462, Gated ABMIL 0.456, SVM 0.451 (mean over 15 folds). Residual minus learned-only: mean 0.019, 90% interval [-0.057, 0.095], p 0.665. Symptom-Guided not run.",
+      "evidence": [
+        "Results/E1_full.md",
+        "Results/E1_pilot.md"
+      ],
+      "verdict": "inconclusive",
+      "rationale": "The criterion needs both primary comparators; Symptom-Guided was not run, and the learned-only interval crosses -0.05, so neither supported nor refuted. All arms are at chance, so equivalence here would only mean all methods fail alike; the interval was not Holm-adjusted."
+    },
+    {
+      "id": "H2",
+      "experiment": "E2",
+      "statement": "the residual model has a higher AUROC than its prior-only ablation ($D_b = 0$) and its residual-only ablation ($\\lambda = 0$); a learned global intensity is compared with a fixed one and with per-node intensities (Ec. 57).",
+      "metric": "",
+      "test": "",
+      "criterion": "a Friedman test over the five variants on the 15 replicates rejects equal ranks at alpha 0.05, and the Holm-corrected Ec. 63 difference between the residual model and each of the two primary ablations (prior only, residual only) is above zero; the comparisons of learned versus fixed and global versus per-node intensity are exploratory, with Benjamini-Hochberg adjustment and effect sizes d_z.",
+      "observed": "E2 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E2 yet; it is out of the proof-of-concept scope."
+    },
+    {
+      "id": "H3",
+      "experiment": "E3",
+      "statement": "the ordering of methods in E1 is preserved when eGeMAPSv02 is replaced by a pooled self-supervised encoder and by an emotion-aware encoder.",
+      "metric": "",
+      "test": "",
+      "criterion": "for each extractor, the equivalence reading of E1 (Ec. 69, margin 0.05) is repeated for both primary contrasts and its decision is reported; the ordering is summarized by a Friedman test over the three methods on the 15 replicates and by Kendall's W, and the extractor is counted as preserving the E1 ordering only when its Friedman mean ranks keep the E1 order.",
+      "observed": "E3 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E3 yet; it is out of the proof-of-concept scope."
+    },
+    {
+      "id": "H4",
+      "experiment": "E4",
+      "statement": "at the 141 training subjects, the residual model has a lower variance across seeds and partitions than Symptom-Guided, in AUROC and in attention-map stability, with AUROC equivalent within 0.05 (E1).",
+      "metric": "",
+      "test": "",
+      "criterion": "H2 is supported when the 95% percentile interval of the fold-block bootstrap log variance ratio lies above zero for AUROC and for attention-map stability, with Holm correction over the two, and the AUROC equivalence of E1 holds for Symptom-Guided.",
+      "observed": "E4 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E4 yet; it is out of the proof-of-concept scope."
+    },
+    {
+      "id": "H5",
+      "experiment": "E5",
+      "statement": "using all instances does not lower AUROC relative to TCAMIL top-k selection, the effective number of attended instances (Ec. 52) exceeds k, and training time grows with bag size at a rate estimated with its interval.",
+      "metric": "",
+      "test": "",
+      "criterion": "for every k, the lower bound of the Holm-adjusted 90% interval of the all-instance minus top-k difference (Ec. 69) lies above -0.05, which is non-inferiority at the equivalence margin; the median effective number of attended instances is above k; the slope of training time per epoch on bag size is reported with its 95% interval, and the cost claim holds when the interval of a quadratic term contains zero.",
+      "observed": "E5 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E5 yet; it is out of the proof-of-concept scope."
+    },
+    {
+      "id": "H6",
+      "experiment": "E6",
+      "statement": "with a permuted prior the AUROC falls to the residual-only level; prompt-based proximities give an AUROC at least as high as response-based ones but a lower LiftSem and a lower effective attention, and their advantage vanishes when the answers to the mental-health-history prompts are removed.",
+      "metric": "",
+      "test": "",
+      "criterion": "averaged over 5 permuted-prior draws, the permuted-prior AUROC is equivalent within 0.05 to the residual-only AUROC by the two one-sided tests of Ec. 69, with permutation p values computed as (b + 1) / (m + 1); H4 is refuted if prompt-based proximities raise both AUROC and LiftSem without lowering the effective attention, and the prompt versus prompt-with-history-removed contrast is read as a paired difference on the same runs, with Holm correction over the three contrasts.",
+      "observed": "E6 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E6 yet; it is out of the proof-of-concept scope."
+    },
+    {
+      "id": "H7",
+      "experiment": "E7",
+      "statement": "each node contribution (Ec. 61) correlates with its PHQ-8 item score above the permuted-prior null.",
+      "metric": "",
+      "test": "",
+      "criterion": "at least one item has a Spearman correlation whose permutation p value, Holm-corrected over the eight items, is below 0.05, and whose paired subject-level bootstrap interval of the difference to the permuted-prior correlation lies above zero; the count of such items is reported.",
+      "observed": "E7 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E7 yet; it is out of the proof-of-concept scope."
+    },
+    {
+      "id": "H8",
+      "experiment": "E8",
+      "statement": "LiftSem with the zero-shot NLI relevance matrix is positive against the within-bag permutation null (Ec. 60), and larger for the residual model than for the comparators and the permuted-prior model.",
+      "metric": "",
+      "test": "",
+      "criterion": "the unit is the subject (184 Wizard-of-Oz subjects); the residual LiftSem is above the within-bag permutation null with a permutation p value below 0.05, and its subject-paired difference to each comparator, tested with the paired Wilcoxon signed-rank test, is above zero after Holm correction over the three contrasts, with the rank-biserial correlation as effect size; the rank correlation between S_b and R_b (Ec. 67) is reported as a pre-registered check.",
+      "observed": "E8 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E8 yet; it is out of the proof-of-concept scope."
+    },
+    {
+      "id": "H9",
+      "experiment": "E9",
+      "statement": "trained on the Wizard-of-Oz training subjects only, the residual model is read once on the official test split of 56 agent-led sessions; the reading is descriptive (proposal r06, H7), and on MODMA the ordering of methods is described.",
+      "metric": "",
+      "test": "",
+      "criterion": "none; E9 is descriptive. The intervals are reported whatever their direction, and with 21 positive sessions equivalence within 0.05 is not claimed. On MODMA the ordering of the three primary methods is reported without significance language.",
+      "observed": "E9 was not run in the proof of concept.",
+      "evidence": [],
+      "verdict": "inconclusive",
+      "rationale": "No measurement exists for E9 yet; it is out of the proof-of-concept scope."
+    }
+  ],
+  "novelty": {
+    "claim": "Correcting a permanent semantic prior with a learned residual gives MIL attention over interview answers that is as accurate as text-aware attention and more stable across seeds.",
+    "verdict": "not_justified",
+    "evidence": [
+      "Results/E1_full.md",
+      "Results/E1_pilot.md"
+    ],
+    "rationale": "At full E1 scale no arm, the residual model included, separates depressed from non-depressed subjects above chance, so the proof of concept cannot show any benefit of the residual correction. Stability (H4) and the Symptom-Guided comparison were not measured."
+  },
+  "qualitative": [],
+  "qualitative_not_applicable": "No attention or interpretability reading is meaningful while every arm is at chance; the attention-map analyses belong to E4, E7 and E8, which were not run.",
+  "limitations": [
+    "Symptom-Guided, a primary H1 comparator, was not implemented.",
+    "Deviations accepted by the operator: cleaned instead of raw audio, session gain -26 dBFS, silence threshold 35 dB, pre-cut wavs for 318/321/341/362.",
+    "Comparisons pool 15 partitions through the corrected resampled t without Holm adjustment; this statistical reading is still to be confirmed.",
+    "Small sample: 141 training subjects, 44 positive; outer test folds of 28-29 subjects."
+  ],
+  "next_steps": [
+    "Implement Symptom-Guided and rerun E1 to complete the H1 comparison.",
+    "Diagnose whether the acoustic and text features carry any subject-level signal (e.g. per-feature or text-only baselines) before scaling further.",
+    "Confirm the statistical reading of the pooled comparisons."
+  ],
+  "available_evidence": {
+    "figures": [],
+    "tables": [],
+    "qualitative": [],
+    "significance": []
+  }
+}

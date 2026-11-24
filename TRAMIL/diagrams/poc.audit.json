@@ -1,0 +1,107 @@
+{
+  "kind": "poc",
+  "verdict": "fail",
+  "failures": [
+    "margins"
+  ],
+  "messages": [
+    "margins: right margin 5.857 pt > 4.0 pt"
+  ],
+  "png_sha256": "8f8d3aa34b8fbc72eb6a674e75f276c994b54c6943dff9ed28a00f5bc9bea421",
+  "pdf_sha256": "5de030d9b2ff13958d42d49da6a2c10ea0ca7cb233ae15ca26870f4d80596108",
+  "print": {
+    "body_pt": 10.0,
+    "body_source": "default",
+    "text_width_pt": 345.0,
+    "width_fraction": 1.0,
+    "printed_width_pdf_pt": 343.71108343711086,
+    "fonts": {
+      "claim": 8.8,
+      "spine": 8.2,
+      "note": 7.6
+    }
+  },
+  "audited_at": "2026-11-18T20:01:54+00:00",
+  "report": {
+    "verdict": "fail",
+    "failures": [
+      "margins"
+    ],
+    "body_pt": 10.0,
+    "printed_width_pt": 343.711,
+    "min_printed_pt": 7.0,
+    "max_printed_pt": 9.0,
+    "checks": {
+      "overfull": {
+        "verdict": "pass",
+        "reason": null,
+        "lines": []
+      },
+      "size_switches": {
+        "verdict": "pass",
+        "reason": null,
+        "found": []
+      },
+      "text_overlap": {
+        "verdict": "pass",
+        "reason": null,
+        "span_count": 47,
+        "shape_count": 13,
+        "span_collisions": [],
+        "boundary_crossings": [],
+        "background_shape": null
+      },
+      "font_range": {
+        "verdict": "pass",
+        "reason": null,
+        "scale": 0.994603,
+        "mediabox_width_pt": 345.576,
+        "printed_width_pt": 343.711,
+        "body_pt": 10.0,
+        "min_printed_pt": 7.0,
+        "min_printed_pdf_pt": 6.9738,
+        "max_printed_pt": 9.0,
+        "max_printed_pdf_pt": 8.9664,
+        "smallest_printed_pt": 7.531,
+        "largest_printed_pt": 8.72,
+        "span_count": 47,
+        "offending": []
+      },
+      "margins": {
+        "verdict": "fail",
+        "reason": null,
+        "mediabox": [
+          0.0,
+          0.0,
+          345.576,
+          160.552
+        ],
+        "bbox": [
+          1.473,
+          1.345,
+          339.719,
+          158.653
+        ],
+        "margins": {
+          "left": 1.473,
+          "bottom": 1.345,
+          "right": 5.857,
+          "top": 1.899
+        },
+        "full_page_background": false,
+        "counts": {
+          "text": 21,
+          "image": 0,
+          "path": 19,
+          "other": 0
+        },
+        "background_shape": null,
+        "max_margin_pt": 4.0,
+        "wide_sides": {
+          "right": 5.857
+        },
+        "clipped_sides": {}
+      }
+    }
+  }
+}

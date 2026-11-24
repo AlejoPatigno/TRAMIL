@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "kind": "poc",
+  "claim": "A rehearsal-scale pilot runs the residual correction of a semantic prior end to end on E-DAIC",
+  "focal": "corr",
+  "nodes": [
+    {"id": "bags", "label": "E-DAIC answer bags", "role": "state", "row": "spine"},
+    {"id": "feat", "label": "Extract eGeMAPS and mpnet", "role": "operator", "row": "spine"},
+    {"id": "corr", "label": "Correct the semantic prior", "role": "focal", "row": "spine"},
+    {"id": "agg", "label": "Aggregate per subject", "role": "operator", "row": "spine"},
+    {"id": "auc", "label": "Subject AUROC", "role": "state", "row": "spine"},
+    {"id": "cache", "label": "Feature cache on Kaggle", "role": "evidence", "row": "evidence", "under": "feat"},
+    {"id": "table", "label": "E1 pilot table", "role": "evidence", "row": "evidence", "under": "auc"},
+    {"id": "src", "label": "Labels from PHQ-8 items", "role": "context", "row": "context", "near": "bags"},
+    {"id": "cmp", "label": "Against ABMIL, learned-only, SVM", "role": "context", "row": "context", "near": "agg"}
+  ],
+  "edges": [
+    {"from": "bags", "to": "feat", "semantics": "data", "prominence": "primary"},
+    {"from": "feat", "to": "corr", "semantics": "data", "prominence": "primary"},
+    {"from": "corr", "to": "agg", "semantics": "data", "prominence": "primary"},
+    {"from": "agg", "to": "auc", "semantics": "data", "prominence": "primary"},
+    {"from": "feat", "to": "cache", "semantics": "data", "prominence": "secondary"},
+    {"from": "auc", "to": "table", "semantics": "data", "prominence": "secondary"}
+  ],
+  "sources": [
+    "AGREED.md",
+    "proposals\\research-concept-residual-semantic-prior-bipartite-mil-r06.md"
+  ]
+}
