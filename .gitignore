@@ -3,4 +3,6 @@ __pycache__/
 *.egg-info/
 .implementation/
 Data/
-.pytest_tmp/
+.pytest_tmp*/
+features_pilot55_local/
+TRAMIL/Results/shards/

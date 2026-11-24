@@ -144,6 +144,23 @@ Pass iff gates valid and F1', F2, F2b, F3, F4 hold (seed means). Pass -> experim
     the trained readout fails, not because aggregation is the bottleneck. The learned pipeline (encoder + attention
     pool + heads, Adam lr 1e-2, 40 epochs), not only the graph residual, fails to learn the item task.
 
+## T7 training diagnostic + v3c (operator go 2026-11-20; fixed before any T7 run)
+Why: v3b FAIL; the graph-free trained model (ORACLE-SEG, test MSE 1.78) loses to the constant (1.25) while
+ORACLE-NB reaches 0.65: training/readout does not learn the item task, so the graph cannot be judged. Also V2 was
+mis-specified (compared to a trained model).
+Step 1 (diagnostic, no PoC criteria, never touches test), a = 0.5, graph-free model (H~ = H):
+- D1 capacity: on 16 train bags, train MSE must fall well below the constant (report curve). If it cannot,
+  report the readout defect before any sweep.
+- D2 sweep chosen on val only: lr {1e-3, 3e-3, 1e-2}; epochs up to 400 with best-epoch on val;
+  W_o init {zero (r12), small random N(0, 0.01)}. Pick the config with lowest val MSE.
+- Gate V3: chosen graph-free config val MSE < constant val MSE. If no config passes: stop, report; v3c not run.
+Step 2 (v3c): v3b rerun with the chosen training config for ALL arms; same F1', F2, F2b, F3, F4, same V1;
+V2 corrected: ORACLE-NB val MSE <= 0.9 x ORACLE-BAG val MSE, ORACLE-BAG = per-item linear head on the bag mean of
+all segment features (no item routing). a calibrated with oracles only, as in v3b.
+Pass -> experiments protocol. Fail -> report; operator decides.
+Note: if a non-zero W_o init is chosen, that is a finding for r12 (which initializes W_o at zero).
+- [ ] T7 diagnostic + v3c, reports `TRAMIL/Results/poc_training_diag.md`, `poc_graph_penalty_v3c.md` (+ .json)
+
 ## Next step
 v3b (T6): FAIL (F1' vs constant, F2b vs uniform); gate chose a = 0.5. Even the graph-free trained model is worse
 than a constant, so the training/readout setup fails before the graph mechanism can be judged. Operator decides.

@@ -266,3 +266,51 @@ def test_v3b_verdicts_add_constant_and_uniform_comparisons():
     assert ver["F1p"]["pass"] and not ver["F2b"]["pass"] and ver["overall"] == "FAIL"
     res["uniform_mass_dis"] = [0.2]
     assert v3._verdicts_v3b(res, [0.0, 1.0], a=2.0)["overall"] == "PASS"
+
+
+# ---- T7: training diagnostic + v3c ----
+def test_t7_best_epoch_is_selected_on_val_and_restored():
+    tr, va = v3.make_data_v3(0, 8, split=0), v3.make_data_v3(0, 6, split=1)
+    model = v3.train_v3(tr, 0.0, seed=0, epochs=12, graph=False, val=va)
+    hist = model.history
+    assert len(hist["val"]) == 12
+    assert hist["best_epoch"] == int(np.argmin(hist["val"])) + 1  # 1-based, ties -> earliest
+    assert abs(v3.model_mse(model, va, graph=False) - min(hist["val"])) < 1e-6
+    plain = v3.train_v3(tr, 0.0, seed=0, epochs=12, graph=False)  # no val: last epoch, no history
+    assert not hasattr(plain, "history")
+
+
+def test_t7_wo_init_option_and_default_unchanged():
+    torch.manual_seed(0)
+    assert torch.count_nonzero(v3.ModelV3().W_o.weight) == 0
+    assert torch.count_nonzero(v3.ModelV3(wo_init="zero").W_o.weight) == 0
+    torch.manual_seed(0)
+    w = v3.ModelV3(wo_init="normal").W_o.weight
+    assert 0.07 < w.std().item() < 0.13  # N(0, 0.01) read as variance 0.01 -> sd 0.1
+    bags = v3.make_data_v3(1, 4, split=0)
+    a, b = v3.train_v3(bags, 0.0, seed=3, epochs=2), v3.train_v3(bags, 0.0, seed=3, epochs=2, wo_init="zero")
+    assert all(torch.equal(x, y) for x, y in zip(a.state_dict().values(), b.state_dict().values()))
+
+
+def test_t7_oracle_bag_uses_the_bag_mean_without_item_routing():
+    b = v3.make_data_v3(2, 1, split=0)[0]
+    Z = v3._bag_design(b)
+    assert Z.shape == (v3.J, v3.DX + 1)
+    assert torch.allclose(Z[:, :-1], b["X"].double().mean(0).expand(v3.J, -1))
+    shuffled = dict(b, z_ac=b["z_ac"].flip(0))  # item routing is ignored
+    assert torch.equal(v3._bag_design(shuffled), Z)
+    tr, te = v3.make_data_v3(2, 128, split=0), v3.make_data_v3(2, 32, split=1)
+    W = v3.fit_oracle_bag(tr)
+    assert W.shape == (v3.J, v3.DX + 1)
+    assert v3.oracle_bag_mse(W, te) < 2.0
+
+
+def test_t7_gate_v3_and_d1_stopping_logic():
+    assert v3.d1_pass([1.3, 0.9, 0.5], const=1.2) and not v3.d1_pass([1.3, 0.9, 0.7], const=1.2)  # <= 0.5 x const
+    configs = {"a": dict(val=1.4), "b": dict(val=1.1), "c": dict(val=1.3)}
+    assert v3.pick_config(configs) == "b"
+    assert v3.gate_v3(1.1, const_val=1.25) and not v3.gate_v3(1.25, const_val=1.25)
+    out = v3.run_v3c(dict(V3=dict(pass_=False)), out_dir=None)
+    assert out == dict(overall="NOT RUN", reason="gate V3 failed")
+    gates = {0.5: dict(nb=0.6, bag=0.65, const=1.25), 1.0: dict(nb=0.3, bag=0.4, const=1.25)}
+    assert v3.choose_a(gates, ref="bag") == 1.0

@@ -92,12 +92,14 @@ def offdiag(n, dtype):
 
 
 class ModelV3(nn.Module):
-    def __init__(self):
+    def __init__(self, wo_init="zero"):
         super().__init__()
         self.enc = nn.Linear(DX, DH)
         self.W_a, self.W_g = nn.Linear(DH, DH, bias=False), nn.Linear(DH, DH, bias=False)
         self.W_o = nn.Linear(DH, J, bias=False)
         nn.init.zeros_(self.W_o.weight)
+        if wo_init == "normal":  # T7 option: N(0, 0.01) in the document's N(mean, variance) notation -> sd 0.1
+            nn.init.normal_(self.W_o.weight, 0.0, 0.1)
         self.head = nn.Linear(DH, J)
 
     def delta(self, H):
@@ -119,9 +121,12 @@ class ModelV3(nn.Module):
         return ((Ga - G) * offdiag(len(H), H.dtype)).pow(2).sum() / len(H) ** 2
 
 
-def train_v3(bags, mu, kappa_tau=KAPPA_TAU, prior_only=False, seed=0, epochs=40, lr=1e-2, batch=8, graph=True):
+def train_v3(bags, mu, kappa_tau=KAPPA_TAU, prior_only=False, seed=0, epochs=40, lr=1e-2, batch=8, graph=True,
+             wo_init="zero", val=None):
+    """With `val`, the item MSE on val is recorded after every epoch and the best epoch (ties -> earliest) is restored."""
     torch.manual_seed(seed)
-    model = ModelV3()
+    model = ModelV3(wo_init)
+    hist, best = [], None
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     for _ in range(epochs):
         order = torch.randperm(len(bags)).tolist()
@@ -136,7 +141,20 @@ def train_v3(bags, mu, kappa_tau=KAPPA_TAU, prior_only=False, seed=0, epochs=40,
             opt.zero_grad()
             (loss / len(order[st:st + batch])).backward()
             opt.step()
+        if val is not None:
+            hist.append(model_mse(model, val, kappa_tau, prior_only, graph))
+            if best is None or hist[-1] < min(hist[:-1]):
+                best = copy.deepcopy(model.state_dict())
+    if val is not None:
+        model.load_state_dict(best)
+        model.history = dict(val=hist, best_epoch=int(np.argmin(hist)) + 1)
     return model
+
+
+@torch.no_grad()
+def model_mse(model, bags, kappa_tau=KAPPA_TAU, prior_only=False, graph=True):
+    return float(np.mean([(model(b["X"], b["G"], kappa_tau, prior_only, graph)[0] - b["s"]).pow(2).mean().item()
+                          for b in bags]))
 
 
 @torch.no_grad()
@@ -292,7 +310,11 @@ def _nb_design(b):
 
 
 def fit_oracle_nb(bags):
-    Z = torch.stack([_nb_design(b) for b in bags])  # B x J x (DX + 1)
+    return _fit_ols(_nb_design, bags)
+
+
+def _fit_ols(design, bags):
+    Z = torch.stack([design(b) for b in bags])  # B x J x (DX + 1)
     S = torch.stack([b["s"] for b in bags]).double()
     return torch.stack([torch.linalg.lstsq(Z[:, j], S[:, j:j + 1], rcond=1e-6, driver="gelsd").solution[:, 0] for j in range(J)])
 
@@ -315,10 +337,10 @@ def uniform_mass_dis(bags):
     return torch.cat(vals).mean().item()
 
 
-def choose_a(gates):
+def choose_a(gates, ref="seg"):
     for a in sorted(gates):
         g = gates[a]
-        if g["nb"] <= 0.8 * g["const"] and g["nb"] <= 0.9 * g["seg"]:
+        if g["nb"] <= 0.8 * g["const"] and g["nb"] <= 0.9 * g[ref]:
             return a
     return None
 
@@ -333,16 +355,16 @@ def _verdicts_v3b(res, mu_grid=MU_GRID_V3, a=None):
     return dict(ver, F1p=f1p, F2b=f2b, a=a, overall="PASS" if ok else "FAIL")
 
 
-def _gate_lines(gates, chosen):
+def _gate_lines(gates, chosen, ref="seg", name="SEG"):
     lines = ["## Validity gate (oracles only; decided on val, seed means; test shown, decides nothing)", "",
-             "| a | constant val | ORACLE-NB val | ORACLE-SEG val | NB/const (V1 <= 0.8) | NB/SEG (V2 <= 0.9) | V1 | V2 "
-             "| constant test | NB test | SEG test |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+             f"| a | constant val | ORACLE-NB val | ORACLE-{name} val | NB/const (V1 <= 0.8) | NB/{name} (V2 <= 0.9) "
+             f"| V1 | V2 | constant test | NB test | {name} test |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for a, d in gates.items():
         v, te = d["val"], d["test"]
-        r1, r2 = v["nb"] / v["const"], v["nb"] / v["seg"]
-        lines.append(f"| {a:g} | {v['const']:.4f} | {v['nb']:.4f} | {v['seg']:.4f} | {r1:.3f} | {r2:.3f} | "
+        r1, r2 = v["nb"] / v["const"], v["nb"] / v[ref]
+        lines.append(f"| {a:g} | {v['const']:.4f} | {v['nb']:.4f} | {v[ref]:.4f} | {r1:.3f} | {r2:.3f} | "
                      f"{'pass' if r1 <= 0.8 else 'fail'} | {'pass' if r2 <= 0.9 else 'fail'} | {te['const']:.4f} | "
-                     f"{te['nb']:.4f} | {te['seg']:.4f} |")
+                     f"{te['nb']:.4f} | {te[ref]:.4f} |")
     lines += ["", f"**Chosen a: {chosen if chosen is not None else 'none -> INVALID'}**", ""]
     return lines
 
@@ -353,6 +375,12 @@ def _markdown_v3b(gates, chosen, res=None, ver=None):
              "not proposal values.", "", READINGS, "", READINGS_V3B, ""] + _gate_lines(gates, chosen)
     if res is None:
         return "\n".join(lines + ["**Overall: INVALID** (no a passes V1 and V2; no model arm was trained or evaluated)", ""])
+    return "\n".join(lines + _v3b_body(res, ver, chosen, (("constant (train item mean)", "constant"),
+                                                            ("ORACLE-NB", "oracle_nb"), ("ORACLE-SEG", "oracle_seg"))))
+
+
+def _v3b_body(res, ver, chosen, oracle_rows):
+    lines = []
 
     def cell(runs, k):
         return f"{_mean(runs, k):.4f} +- {np.std([r[k] for r in runs], ddof=1):.4f}"
@@ -368,7 +396,7 @@ def _markdown_v3b(gates, chosen, res=None, ver=None):
         lines.append(f"| {name} | {cell(runs, 'loss')} | {cell(runs, 'val_loss')} | {cell(runs, 'nbr_mass_dis')} | "
                      f"{cell(runs, 'ga_dist')} | {max(r['max_abs_delta'] for r in runs):.4f} | "
                      f"{sum(r['band_ok'] for r in runs)}/{len(runs)} |")
-    for name, key in (("constant (train item mean)", "constant"), ("ORACLE-NB", "oracle_nb"), ("ORACLE-SEG", "oracle_seg")):
+    for name, key in oracle_rows:
         lines.append(f"| {name} | {cell(res[key], 'loss')} | {cell(res[key], 'val_loss')} | - | - | - | - |")
     u = res["uniform_mass_dis"]
     lines.append(f"| uniform row (F2b reference) | - | - | {np.mean(u):.4f} +- {np.std(u, ddof=1):.4f} | - | - | - |")
@@ -388,7 +416,7 @@ def _markdown_v3b(gates, chosen, res=None, ver=None):
               f"- F4 bounded: max|Delta| {f4['max_abs_delta']:.6f} < {f4['bound']:g}, max|diag Delta| "
               f"{f4['delta_diag_max']:g}, Pi band holds in {f4['band_ok_runs']}/{f4['n_runs']} runs. **{pf(f4)}**",
               "", f"**Overall: {ver['overall']}**", "", "Pre-registered reading: PASS -> experiments protocol.", ""]
-    return "\n".join(lines)
+    return lines
 
 
 def run_v3b(out_dir=OUT):
@@ -442,6 +470,211 @@ def run_v3b(out_dir=OUT):
     return ver
 
 
+
+# ---------------- T7: training diagnostic (Step 1) + v3c (Step 2) ----------------
+LR_GRID_T7, WO_INITS, MAX_EPOCHS_T7 = [1e-3, 3e-3, 1e-2], ["zero", "normal"], 400
+
+READINGS_T7 = """Readings of the pre-registered T7 spec, fixed before any T7 run:
+- Step 1 uses a = 0.5 and the graph-free model (H~ = H: encoder, attention pool W_o, item heads), batch 8, Adam.
+  Test is never read in Step 1 (only train and val bags are generated).
+- D1: the first 16 train bags of seed 0; v3 config (lr 1e-2, W_o = 0), 400 epochs; train MSE on those 16 bags after
+  every epoch. "Well below the constant" read as min train MSE <= 0.5 x the constant's train MSE on the same bags.
+  If D1 fails, D2 is not run and the readout defect is reported.
+- D2: grid lr {1e-3, 3e-3, 1e-2} x W_o init {zero, normal}; 5 seeds, full 256 train bags; up to 400 epochs, val
+  item MSE after every epoch, best epoch on val (ties -> earliest) per run. Config score = seed mean of the best
+  val MSE; the config with the lowest score is chosen. "N(0, 0.01)" read in the document's N(mean, variance)
+  notation (as N(0, 0.005^2) for the prompt noise): sd 0.1.
+- Gate V3: chosen config's score < constant val MSE (seed mean of the per-item training-mean predictor on val).
+  V3 fails -> v3c is not run.
+- v3c "training config" = chosen lr and W_o init, with the per-run rule "up to 400 epochs, best epoch on val (item
+  MSE without the mu term)" for EVERY arm (full per mu, prior-only, acoustic-only). mu* = argmin over mu of the
+  val item MSE at each run's best epoch. ORACLE-SEG is not computed in v3c (V2 now uses ORACLE-BAG).
+- ORACLE-BAG: per bag, the mean of all raw segment features X (no item routing), the same vector for all 8 items;
+  one OLS head (with intercept) per item, fit on train (gelsd, relative rcond 1e-6, as ORACLE-NB).
+- Runs are independent (each seeds itself) and are executed in parallel worker processes with 1 torch thread each;
+  results do not depend on the parallelism."""
+
+
+def _bag_design(b):
+    return torch.cat([b["X"].double().mean(0).expand(J, -1), torch.ones(J, 1, dtype=torch.float64)], 1)
+
+
+def fit_oracle_bag(bags):
+    return _fit_ols(_bag_design, bags)
+
+
+def oracle_bag_mse(W, bags):
+    return item_mse(lambda b: (_bag_design(b) * W).sum(1), bags)
+
+
+def d1_pass(curve, const):
+    return min(curve) <= 0.5 * const
+
+
+def pick_config(configs):
+    return min(configs, key=lambda k: configs[k]["val"])
+
+
+def gate_v3(val, const_val):
+    return val < const_val
+
+
+def _init_worker():
+    torch.set_num_threads(1)
+
+
+def _pool_map(fn, jobs):
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(max_workers=min(14, len(jobs)), initializer=_init_worker) as ex:
+        return list(ex.map(fn, jobs))
+
+
+def _job_d2(job):
+    lr, wo, seed = job
+    tr, va = make_data_v3(seed, N_TRAIN, split=0), make_data_v3(seed, N_VAL, split=1)
+    m = train_v3(tr, 0.0, seed=seed, epochs=MAX_EPOCHS_T7, lr=lr, graph=False, wo_init=wo, val=va)
+    return dict(lr=lr, wo_init=wo, seed=seed, val=min(m.history["val"]), best_epoch=m.history["best_epoch"],
+                val_curve=m.history["val"][::10])
+
+
+def _cfg_key(lr, wo):
+    return f"lr={lr:g}, W_o={wo}"
+
+
+def run_training_diag(out_dir=OUT):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md, js = out_dir / "poc_training_diag.md", out_dir / "poc_training_diag.json"
+    md.write_text("# Training diagnostic (running)\n\n" + READINGS_T7 + "\n", encoding="utf-8")
+    tr16 = make_data_v3(0, 16, split=0)
+    torch.set_num_threads(1)
+    curve = train_v3(tr16, 0.0, seed=0, epochs=MAX_EPOCHS_T7, graph=False, val=tr16).history["val"]
+    c16 = constant_mse(tr16, tr16)
+    d1 = dict(curve=curve, const_train=c16, min_train=min(curve), argmin_epoch=int(np.argmin(curve)) + 1,
+              pass_=bool(d1_pass(curve, c16)))
+    out = dict(readings=READINGS_T7, D1=d1)
+    if not d1["pass_"]:
+        out.update(D2=None, V3=dict(pass_=False, reason="D1 failed: readout cannot fit 16 bags"))
+    else:
+        runs = _pool_map(_job_d2, [(lr, wo, s) for lr in LR_GRID_T7 for wo in WO_INITS for s in SEEDS])
+        const_val = float(np.mean([constant_mse(make_data_v3(s, N_TRAIN, 0), make_data_v3(s, N_VAL, 1)) for s in SEEDS]))
+        configs = {}
+        for lr in LR_GRID_T7:
+            for wo in WO_INITS:
+                rs = [r for r in runs if r["lr"] == lr and r["wo_init"] == wo]
+                configs[_cfg_key(lr, wo)] = dict(lr=lr, wo_init=wo, val=float(np.mean([r["val"] for r in rs])),
+                                                 val_sd=float(np.std([r["val"] for r in rs], ddof=1)),
+                                                 best_epoch=[r["best_epoch"] for r in rs], runs=rs)
+        k = pick_config(configs)
+        out["D2"] = dict(configs=configs, chosen=k, const_val=const_val)
+        out["V3"] = dict(chosen=k, lr=configs[k]["lr"], wo_init=configs[k]["wo_init"], val=configs[k]["val"],
+                         const_val=const_val, pass_=bool(gate_v3(configs[k]["val"], const_val)))
+    js.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    md.write_text(_markdown_diag(out), encoding="utf-8")
+    return out
+
+
+def _markdown_diag(out):
+    d1 = out["D1"]
+    marks = [1, 10, 25, 50, 100, 200, 300, 400]
+    lines = ["# Training diagnostic (T7 Step 1): can the graph-free readout learn the item task?", "",
+             "Diagnostic only, no PoC criterion; test is never read. a = 0.5, synthetic data, PoC settings.", "",
+             READINGS_T7, "", "## D1 capacity (16 train bags, lr 1e-2, W_o = 0)", "",
+             "| epoch | " + " | ".join(str(e) for e in marks) + " |", "|---" * (len(marks) + 1) + "|",
+             "| train MSE | " + " | ".join(f"{d1['curve'][e - 1]:.4f}" for e in marks) + " |", "",
+             f"Constant train MSE on these bags {d1['const_train']:.4f}; min train MSE {d1['min_train']:.4f} at epoch "
+             f"{d1['argmin_epoch']} (needs <= {0.5 * d1['const_train']:.4f}). **D1 {'PASS' if d1['pass_'] else 'FAIL'}**", ""]
+    if out["D2"] is None:
+        return "\n".join(lines + [f"**{out['V3']['reason']}; D2 not run; v3c not run.**", ""])
+    d2, v = out["D2"], out["V3"]
+    lines += ["## D2 sweep (val only; best epoch on val per run; 5 seeds)", "",
+              "| config | best val MSE (mean +- sd) | best epoch per seed |", "|---|---|---|"]
+    lines += [f"| {k} | {c['val']:.4f} +- {c['val_sd']:.4f} | {c['best_epoch']} |" for k, c in d2["configs"].items()]
+    lines += ["", f"Constant val MSE {d2['const_val']:.4f}. Chosen config: **{d2['chosen']}**.", "",
+              f"## Gate V3: chosen val MSE {v['val']:.4f} < constant val MSE {v['const_val']:.4f}. "
+              f"**{'PASS' if v['pass_'] else 'FAIL'}**", ""]
+    if v["wo_init"] == "normal":
+        lines += ["Finding for r12: the chosen config uses a non-zero W_o initialization (r12 initializes W_o = 0).", ""]
+    if not v["pass_"]:
+        lines += ["v3c not run (V3 failed).", ""]
+    return "\n".join(lines)
+
+
+def _job_arm(job):
+    seed, a, arm, mu, lr, wo = job
+    tr, va, te = (make_data_v3(seed, n, split=k, a=a) for k, n in enumerate((N_TRAIN, N_VAL, N_TEST)))
+    kw = dict(prior_only=True) if arm == "prior_only" else dict(kappa_tau=0.0) if arm == "acoustic_only" else {}
+    model = train_v3(tr, mu, seed=seed, epochs=MAX_EPOCHS_T7, lr=lr, wo_init=wo, val=va, **kw)
+    return dict(seed=seed, arm=arm, mu=mu, best_epoch=model.history["best_epoch"],
+                val_loss=evaluate_v3(model, va, **kw)["loss"], **evaluate_v3(model, te, **kw))
+
+
+def run_v3c(diag, out_dir=OUT):
+    if not diag["V3"]["pass_"]:
+        if out_dir is not None:
+            (out_dir / "poc_graph_penalty_v3c.md").write_text(
+                "# Synthetic PoC v3c\n\n**NOT RUN**: gate V3 failed in the training diagnostic.\n", encoding="utf-8")
+        return dict(overall="NOT RUN", reason="gate V3 failed")
+    lr, wo = diag["V3"]["lr"], diag["V3"]["wo_init"]
+    md, js = out_dir / "poc_graph_penalty_v3c.md", out_dir / "poc_graph_penalty_v3c.json"
+    md.write_text("# Synthetic PoC v3c (running)\n\n" + READINGS + "\n\n" + READINGS_V3B + "\n\n" + READINGS_T7 + "\n",
+                  encoding="utf-8")
+    gates, per_seed = {}, {}
+    for a in A_GRID:
+        rows = []
+        for seed in SEEDS:
+            tr, va, te = (make_data_v3(seed, n, split=k, a=a) for k, n in enumerate((N_TRAIN, N_VAL, N_TEST)))
+            Wn, Wb = fit_oracle_nb(tr), fit_oracle_bag(tr)
+            rows.append({sp: dict(const=constant_mse(tr, bs), nb=oracle_nb_mse(Wn, bs), bag=oracle_bag_mse(Wb, bs))
+                         for sp, bs in (("val", va), ("test", te))})
+        per_seed[a] = rows
+        gates[a] = {sp: {k: float(np.mean([r[sp][k] for r in rows])) for k in ("const", "nb", "bag")}
+                    for sp in ("val", "test")}
+    chosen = choose_a({a: g["val"] for a, g in gates.items()}, ref="bag")
+    out = dict(settings=dict(a_grid=A_GRID, lr=lr, wo_init=wo, max_epochs=MAX_EPOCHS_T7, mu_grid=MU_GRID_V3,
+                             seeds=list(SEEDS), inv_tau_a=INV_TAU_A, kappa_tau=KAPPA_TAU,
+                             readings=READINGS + "\n" + READINGS_V3B + "\n" + READINGS_T7,
+                             note="PoC settings on synthetic data, not proposal values"),
+               gates={str(a): g for a, g in gates.items()}, gates_per_seed={str(a): r for a, r in per_seed.items()},
+               chosen_a=chosen)
+    head = ["# Synthetic PoC v3c: v3b with the T7 training config and V2 against ORACLE-BAG", "",
+            "**Existence proof only.** Passing says nothing about E-DAIC performance. Synthetic data; PoC settings are "
+            f"not proposal values. Training config from the T7 diagnostic: lr {lr:g}, W_o init {wo}, up to "
+            f"{MAX_EPOCHS_T7} epochs with best epoch on val, for every arm.", "", READINGS, "", READINGS_V3B, "",
+            READINGS_T7, ""] + _gate_lines(gates, chosen, ref="bag", name="BAG")
+    if chosen is None:
+        out["verdicts"] = dict(overall="INVALID")
+        js.write_text(json.dumps(out, indent=2), encoding="utf-8")
+        md.write_text("\n".join(head + ["**Overall: INVALID** (no a passes V1 and V2; no model arm trained)", ""]),
+                      encoding="utf-8")
+        return out["verdicts"]
+    jobs = [(s, chosen, "full", mu, lr, wo) for s in SEEDS for mu in MU_GRID_V3] + \
+           [(s, chosen, arm, 0.0, lr, wo) for s in SEEDS for arm in ("prior_only", "acoustic_only")]
+    done = _pool_map(_job_arm, jobs)
+    res = dict(full={str(mu): [r for r in done if r["arm"] == "full" and r["mu"] == mu] for mu in MU_GRID_V3},
+               prior_only=[r for r in done if r["arm"] == "prior_only"],
+               acoustic_only=[r for r in done if r["arm"] == "acoustic_only"], constant=[], oracle_nb=[],
+               oracle_bag=[], uniform_mass_dis=[])
+    for seed, row in zip(SEEDS, per_seed[chosen]):
+        for key, k in (("constant", "const"), ("oracle_nb", "nb"), ("oracle_bag", "bag")):
+            res[key].append(dict(loss=row["test"][k], val_loss=row["val"][k]))
+        res["uniform_mass_dis"].append(uniform_mass_dis(make_data_v3(seed, N_TEST, split=2, a=chosen)))
+    ver = _verdicts_v3b(res, a=chosen)
+    js.write_text(json.dumps(dict(out, results=res, verdicts=ver), indent=2), encoding="utf-8")
+    body = _v3b_body(res, ver, chosen, (("constant (train item mean)", "constant"), ("ORACLE-NB", "oracle_nb"),
+                                        ("ORACLE-BAG", "oracle_bag")))
+    epochs = {arm: [r["best_epoch"] for r in rs] for arm, rs in
+              [(f"mu = {mu:g}", res["full"][str(mu)]) for mu in MU_GRID_V3] +
+              [("prior-only", res["prior_only"]), ("acoustic-only", res["acoustic_only"])]}
+    body += ["Best epoch on val per seed: " + "; ".join(f"{k} {v}" for k, v in epochs.items()), ""]
+    md.write_text("\n".join(head + body), encoding="utf-8")
+    return ver
+
+
 if __name__ == "__main__":
     import sys
-    print(run_v3b()["overall"] if "v3b" in sys.argv else run_v3()["overall"])
+    if "t7" in sys.argv:
+        d = run_training_diag()
+        print("V3", d["V3"]["pass_"], flush=True)
+        print(run_v3c(d)["overall"])
+    else:
+        print(run_v3b()["overall"] if "v3b" in sys.argv else run_v3()["overall"])
