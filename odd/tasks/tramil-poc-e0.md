@@ -13,7 +13,7 @@ Constraints: Gate 0 re-run on the new generator (T7 result does not carry over);
 ## Tasks
 - [x] T1 generator + model (Ec. 114-116, 72 with G^, 18, 77) + SS^w (Ec. 93) with tests -- route: delegated writer (2 non-trivial files)
 - [x] T2 runner: gate 0, arms x rho x seeds, stats (Wilcoxon one-sided, Holm, rank-biserial, bootstrap), report, resumable per-run cache, smoke mode, timing probe -- route: same writer
-- [ ] T3 Kaggle job generate + preflight + rehearsal (operator authorizes launch)
+- [x] T3 Kaggle job generate + preflight + rehearsal (operator authorizes launch)
 - [ ] T4 Kaggle run, fetch, report, discussion.json
 
 ## Evidence
@@ -27,3 +27,7 @@ Constraints: Gate 0 re-run on the new generator (T7 result does not carry over);
 - Smoke (2 seeds, scratch dir): pipeline runs end to end through the process pool; smoke ignores the gate verdict by design.
 - Spec readings / gaps: timing lower bound = 100 epochs (stand-in, no observed best-epoch data for E0 arms yet); smoke runs arms even when gate FAILs; test metrics are computed inside each run but no choice reads them.
 - Next: T3 Kaggle job generation + preflight + rehearsal (operator authorizes launch).
+- T3 (2026-11-24): job `tools/kaggle/poc-e0` (CPU, pin 347cc76, carry Results/e0_runs, gate caches cloned).
+  Preflight: 6 pass, warns = local/deadline rehearsal skipped (Windows venv vs WSL tooling), session-fit unmeasured.
+  Remote smoke on alejopatio: complete, `smoke record` pass, `readiness` ready=true. Smoke verdicts are 3-epoch
+  pipeline checks only, not results. Route: inline.
