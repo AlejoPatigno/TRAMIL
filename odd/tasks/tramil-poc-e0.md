@@ -11,9 +11,19 @@ Scope: `src/TRAMIL/poc_e0.py`, `tests/test_poc_e0.py`, results `TRAMIL/Results/p
 Constraints: Gate 0 re-run on the new generator (T7 result does not carry over); test read once after val choices.
 
 ## Tasks
-- [ ] T1 generator + model (Ec. 114-116, 72 with G^, 18, 77) + SS^w (Ec. 93) with tests -- route: delegated writer (2 non-trivial files)
-- [ ] T2 runner: gate 0, arms x rho x seeds, stats (Wilcoxon one-sided, Holm, rank-biserial, bootstrap), report, resumable per-run cache, smoke mode, timing probe -- route: same writer
+- [x] T1 generator + model (Ec. 114-116, 72 with G^, 18, 77) + SS^w (Ec. 93) with tests -- route: delegated writer (2 non-trivial files)
+- [x] T2 runner: gate 0, arms x rho x seeds, stats (Wilcoxon one-sided, Holm, rank-biserial, bootstrap), report, resumable per-run cache, smoke mode, timing probe -- route: same writer
 - [ ] T3 Kaggle job generate + preflight + rehearsal (operator authorizes launch)
 - [ ] T4 Kaggle run, fetch, report, discussion.json
 
 ## Evidence
+- T1+T2 commit fe28b8e (`src/TRAMIL/poc_e0.py`, `tests/test_poc_e0.py`). Route: delegated writer. TDD strict, runner `.venv/Scripts/python -m pytest`.
+  RED: collection ImportError (module absent). GREEN: 14 passed in tests/test_poc_e0.py; full suite 126 passed, 3 skipped.
+  Env note: pytest needs `--basetemp=<writable dir>` here (default %TEMP%/pytest-of-LOQ gives PermissionError for every tmp_path test).
+- Timing probe (`TRAMIL/Results/timing_e0.json`, 1 thread, warmed up): s/epoch none 0.151, surrogate 0.488, text 0.373.
+  Extrapolated full design (30 + 80 + 20 runs): serial 20402 s at 400 epochs (5100 s at 100); /14 workers ideal 1457 s (364 s).
+  Ideal gate estimate 129 s; MEASURED gate wall time on 16 cores was about 12-15 min (contention; linear speedup is optimistic ~5x), so budget the full run at roughly 2 h locally-equivalent; Kaggle sizing to be re-derived in T3.
+- Gate 0 (generator E0, rho 0.5, 5 seeds, `TRAMIL/Results/poc_e0_gate.json`): chosen lr=0.01, W_o=zero, seed-mean best val MSE 1.2199 vs constant 1.2642 -> PASS (margin 3.5%; best epochs 3-6, i.e. early overfit).
+- Smoke (2 seeds, scratch dir): pipeline runs end to end through the process pool; smoke ignores the gate verdict by design.
+- Spec readings / gaps: timing lower bound = 100 epochs (stand-in, no observed best-epoch data for E0 arms yet); smoke runs arms even when gate FAILs; test metrics are computed inside each run but no choice reads them.
+- Next: T3 Kaggle job generation + preflight + rehearsal (operator authorizes launch).
