@@ -1,0 +1,27 @@
+{
+  "seconds_per_epoch": {
+    "none": 0.15093800006434321,
+    "surrogate": 0.48782289994414896,
+    "text": 0.37251449993345886
+  },
+  "device": "cpu (1 torch thread per worker)",
+  "torch": "2.8.0+cpu",
+  "runs": {
+    "none": 30,
+    "surrogate": 80,
+    "text": 20
+  },
+  "workers_assumed": 14,
+  "epochs_upper": 400,
+  "epochs_lower": 100,
+  "note": "lower bound assumes 100 epochs per run (stand-in for best-epoch-style early stopping; the runner always trains the full budget); parallel figures assume linear speedup over workers",
+  "total_serial_s": {
+    "upper": 20401.704798452556,
+    "lower": 5100.426199613139
+  },
+  "total_parallel_s": {
+    "upper": 1457.2646284608968,
+    "lower": 364.3161571152242
+  },
+  "gate_parallel_s": 129.3754286265799
+}
