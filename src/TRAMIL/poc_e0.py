@@ -540,6 +540,8 @@ def run_e0(out_dir=OUT, smoke=False, workers=None):
         js["verdicts"]["gate0"] = gate["verdict"]
     (out_dir / "poc_e0.json").write_text(json.dumps(_clean(js), indent=2), encoding="utf-8")
     (out_dir / "poc_e0.md").write_text(_markdown(js), encoding="utf-8")
+    from TRAMIL.e1_run import _stamp  # shard.json for the remote smoke verdict; no-op outside the runner
+    _stamp(dict(smoke=smoke, verdicts=_clean(js["verdicts"])))
     return js
 
 
