@@ -9,7 +9,10 @@ Ec. 10, LayerNorm on queries, keys and values, softmax(Q K^T / (tau_j sqrt(d_k))
 temperature tau_j per item, the attended vector of item j to its own head. Keys and values are the encoded segments
 H_b (32-d, shared encoder), so the 768-d q_j are mapped to 32 dimensions by the fixed orthonormal projection and the
 scale s_0 of Ec. 81 (v07 table); no further projection matrices, linear heads of Ec. 75 instead of the paper's
-two-layer heads (supervision matching, r22 Section 11)."""
+two-layer heads (supervision matching, r22 Section 11).
+
+Batched (T6b): forwards take a padded batch with an instance mask (item_training.collate/take); every softmax runs
+over the valid segments of each bag only. A lone bag is run as a batch of one."""
 import math
 
 import numpy as np
@@ -17,7 +20,8 @@ import torch
 from torch import nn
 
 from . import corrector
-from .surrogate import H, J, InputEncoder, ItemHeads
+from .item_training import batch_of
+from .surrogate import H, J, InputEncoder, ItemHeads, masked_softmax, pool, unbatch
 
 __provenance__ = {
     "revision": "research-concept-residual-semantic-prior-bipartite-mil-r22.md",
@@ -31,6 +35,9 @@ __provenance__ = {
         "prompt_reading_comparators_read_r_at_inference_and_the_others_do_not",
         "symptom_guided_queries_start_from_projected_item_embeddings_with_unit_mean_norm",
         "models_are_invariant_to_joint_permutation_of_instances",
+        "batched_forward_equals_the_per_bag_models",
+        "batched_loss_and_gradients_equal_the_per_bag_sum",
+        "extra_padding_never_changes_outputs_or_gradients",
     ],
 }
 
@@ -50,7 +57,7 @@ class ABMIL8(nn.Module):
         self.u = nn.Linear(J, 1, bias=False) if with_R else None
         self.heads = ItemHeads()
 
-    def pool(self, b):
+    def _pool(self, b):
         H_ = self.enc(b["Y"])
         t = torch.tanh(self.V(H_))
         if self.U is not None:
@@ -58,11 +65,18 @@ class ABMIL8(nn.Module):
         sc = self.w(t).squeeze(-1)
         if self.u is not None:
             sc = sc + self.u(b["R"]).squeeze(-1)  # Ec. 79: the raw prompt rows r_bi at inference
-        a = torch.softmax(sc, dim=0)
-        return a, a @ H_
+        a = masked_softmax(sc, b["mask"], dim=1)
+        return a, (a.unsqueeze(1) @ H_).squeeze(1)
+
+    def pool(self, b):
+        """(a [N], z [h]) for a lone bag, ([B, N], [B, h]) for a batch."""
+        bb, single = batch_of(b)
+        a, z = self._pool(bb)
+        return (a[0], z[0]) if single else (a, z)
 
     def forward(self, b):
-        return self.heads(self.pool(b)[1])
+        bb, single = batch_of(b)
+        return unbatch(self.heads(self._pool(bb)[1].unsqueeze(1)), single)
 
 
 class R06Items(nn.Module):
@@ -76,13 +90,18 @@ class R06Items(nn.Module):
         self.intensity = corrector.PriorIntensity()
         self.heads = ItemHeads()
 
-    def attention(self, b, H_=None):
-        H_ = self.enc(b["Y"]) if H_ is None else H_
-        return torch.softmax(corrector.fuse(self.corrector(H_), b["R"], self.intensity()), dim=0)
+    def _attention(self, b, H_):
+        L = corrector.fuse(self.corrector(H_), b["R"], self.intensity())
+        return masked_softmax(L, b["mask"][:, :, None], dim=1)
+
+    def attention(self, b):
+        bb, single = batch_of(b)
+        return unbatch(self._attention(bb, self.enc(bb["Y"])), single)
 
     def forward(self, b):
-        H_ = self.enc(b["Y"])
-        return self.heads(self.attention(b, H_).T @ H_)
+        bb, single = batch_of(b)
+        H_ = self.enc(bb["Y"])
+        return unbatch(self.heads(pool(self._attention(bb, H_), H_)), single)
 
 
 def query_projection(seed=QUERY_SEED, h=H, d=768):
@@ -109,11 +128,15 @@ class SymptomGuided(nn.Module):
     def temperature(self):
         return self.log_tau.exp()
 
-    def attention(self, b, H_=None):
-        H_ = self.enc(b["Y"]) if H_ is None else H_
-        S = self.ln_q(self.queries) @ self.ln_k(H_).T / (self.temperature()[:, None] * math.sqrt(H))
-        return torch.softmax(S, dim=1).T  # (N, 8): one distribution over the segments per item
+    def _attention(self, b, H_):
+        S = self.ln_q(self.queries) @ self.ln_k(H_).transpose(1, 2) / (self.temperature()[:, None] * math.sqrt(H))
+        return masked_softmax(S, b["mask"][:, None, :], dim=2).transpose(1, 2)  # [B, N, 8]: per item over segments
+
+    def attention(self, b):
+        bb, single = batch_of(b)
+        return unbatch(self._attention(bb, self.enc(bb["Y"])), single)
 
     def forward(self, b):
-        H_ = self.enc(b["Y"])
-        return self.heads(self.attention(b, H_).T @ self.ln_v(H_))
+        bb, single = batch_of(b)
+        H_ = self.enc(bb["Y"])
+        return unbatch(self.heads(pool(self._attention(bb, H_), self.ln_v(H_))), single)

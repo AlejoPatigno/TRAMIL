@@ -42,7 +42,8 @@ def test_epoch_selection_takes_the_lowest_mean_inner_weighted_mse_earliest_on_ti
 
 
 class _Mean(nn.Module):
-    """Toy item model: mean of the instance rows through eight linear heads; optional constant penalty."""
+    """Toy item model: masked mean of the instance rows of each bag through eight linear heads; optional constant
+    penalty. Takes a padded batch (item_training.collate)."""
 
     def __init__(self, pen=0.0):
         super().__init__()
@@ -50,7 +51,8 @@ class _Mean(nn.Module):
         self.pen = pen
 
     def forward(self, b):
-        return self.fc(b["Y"].mean(0))
+        w = b["mask"].unsqueeze(-1).float()
+        return self.fc((b["Y"] * w).sum(1) / w.sum(1))
 
     def fit_terms(self, b):
         s_hat = self(b)

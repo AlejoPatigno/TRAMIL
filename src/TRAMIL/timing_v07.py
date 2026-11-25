@@ -3,8 +3,8 @@
 One fit = one inner-fold training run of max_epochs (search/real unit work). Neural arms are timed for `epochs` epochs
 and extrapolated linearly to `budget` epochs (extrapolated=True, epochsMeasured, epochBudget recorded); pass
 epochs == budget for an unextrapolated measurement. The SVM fit (inner grid search) is timed whole. Concurrent rows:
-`processes` = N workers each running fits at once through dispatch.run; secondsPerUnit = wall / fits (so the
-fits per hour of the whole device are 3600 / secondsPerUnit). Rows are appended to Results/timing.json (schema 2).
+`processes` = N workers each running one fit at once through dispatch.run after a warm-up unit in every worker;
+secondsPerUnit = mean in-worker fit seconds / N (so the fits per hour of the whole device are 3600 / secondsPerUnit). Rows are appended to Results/timing.json (schema 2).
 
 CLI: python -m TRAMIL.timing_v07 [--out TRAMIL/Results/timing.json] [--epochs 2] [--budget 80] [--workers 1,2,4,8]"""
 import argparse
@@ -29,24 +29,20 @@ __provenance__ = {
 ARMS = (*e1v07_run.E1_NEURAL, "prompt_only", "svm")
 
 
-def _spec(arm, epochs, k, i):
+def _spec(arm, epochs, k):
     if arm == "svm":
-        return {"phase": "real", "rep": 0, "fold": i % 5, "arm": "svm", "model": "svm", "seed": 0}
-    return {"phase": "search", "rep": 0, "fold": i % 5, "inner": 0, "arm": arm, "model": arm, "k": k, "p": 0.0,
+        return {"phase": "real", "rep": 0, "fold": 0, "arm": "svm", "model": "svm", "seed": 0}
+    return {"phase": "search", "rep": 0, "fold": 0, "inner": 0, "arm": arm, "model": arm, "k": k, "p": 0.0,
             "seed": 11, "max_epochs": epochs}
 
 
 def _wall(arm, data, n, epochs, k):
-    """Seconds per fit with n workers each running one fit at once (the n fits start together)."""
-    specs = [_spec(arm, epochs, k, i) for i in range(n)]
-    dispatch.run(e1v07_run.run_unit, specs[:1], data, 1)  # warm-up: prepares fold tensors, compiles kernels
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    dispatch.run(e1v07_run.run_unit, specs, data, n)
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    return (time.perf_counter() - t0) / n
+    """Seconds per fit with n workers each running one fit at once. Every worker first runs the same unit as a warm-up
+    (process start, data load, fold tensors, CUDA context and kernels stay out of the clock); each timed unit measures
+    its own compute seconds (synchronized), so n concurrent fits of t seconds give t / n seconds per fit."""
+    spec = _spec(arm, epochs, k)
+    res = dispatch.run(e1v07_run.run_unit, [spec] * n, data, n, warmup=spec)
+    return sum(r["seconds"] for r in res) / n / n
 
 
 def probe(data, path, arms=ARMS, epochs=2, budget=item_training.MAX_EPOCHS, workers_grid=(1, 2, 4, 8),

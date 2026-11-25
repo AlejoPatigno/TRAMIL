@@ -129,17 +129,13 @@ def permuted_items(items, r):
     return [dict(it, s=np.asarray(s, np.float32), y=int(s.sum() >= item_training.THRESHOLD)) for it, s in zip(items, S)]
 
 
-def _move(bags, dev):
-    return [{k: v.to(dev) if torch.is_tensor(v) else v for k, v in b.items()} for b in bags]
-
-
 def _bags(data, key, items, tr, ev, k, source):
-    """Prepared fold bags on the training device, cached per worker."""
+    """Prepared fold bags collated once into padded tensors on the training device, cached per worker."""
     cache = data.setdefault("cache", {})
     if key not in cache:
         tb, eb, info = frontend.fold_bags(items, tr, ev, k=k, source=source)
         dev = item_training.device()
-        cache[key] = (_move(tb, dev), _move(eb, dev), info["vbar"])
+        cache[key] = (item_training.collate(tb, dev), item_training.collate(eb, dev), info["vbar"])
     return cache[key]
 
 
@@ -490,7 +486,7 @@ def _default_out():
     return Path(os.environ.get("FORGE_CLONE_ROOT", ".")) / "TRAMIL" / "Results" / "E1_v07"
 
 
-def run(phases, out_dir=None, input_root=None, shard=None, units=None, workers=None, limit_bags=None,
+def run(phases, out_dir=None, input_root=None, shard=None, units=None, workers=1, limit_bags=None,
         import_from_inputs=True, **cfg):
     """Remote callable (run-config.json): phases is one phase or a list run in order (a smoke chains them at a tiny
     scale). Earlier kernels' results mounted under the input roots are imported first; shard.json under the runner."""
@@ -501,7 +497,6 @@ def run(phases, out_dir=None, input_root=None, shard=None, units=None, workers=N
     out.mkdir(parents=True, exist_ok=True)
     imported = import_upstream(_input_roots(input_root), out) if import_from_inputs else 0
     data, info = load_data(input_root, limit_bags)
-    workers = workers or dispatch.default_workers(out.parent / "timing.json", item_training.device().type)
     summary = {"imported": imported, "workers": workers, "shard": shard, **info}
     for ph in phases:
         res = run_phase(ph, data, out, workers=workers, shard=shard, only=units, **cfg)
@@ -517,7 +512,7 @@ def main(argv=None):
     ap.add_argument("--input")
     ap.add_argument("--shard")
     ap.add_argument("--units")
-    ap.add_argument("--workers", type=int)
+    ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--limit-bags", type=int)
     ap.add_argument("--max-epochs", type=int, default=item_training.MAX_EPOCHS)
     ap.add_argument("--r-pi", type=int, default=R_PI)

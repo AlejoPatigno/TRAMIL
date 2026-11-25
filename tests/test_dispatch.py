@@ -22,14 +22,17 @@ def test_results_do_not_depend_on_the_number_of_workers():
         assert np.allclose(a["curve"], b["curve"], rtol=1e-5, atol=1e-7)
 
 
-def test_default_workers_come_from_the_best_measured_throughput(tmp_path):
-    p = tmp_path / "timing.json"
-    assert dispatch.default_workers(p, "cuda") == 1
-    rows = [{"device": "cuda", "unit": "fit", "arm": "full", "processes": n, "secondsPerUnit": s}
-            for n, s in ((1, 10.0), (2, 12.0), (4, 30.0))]
-    p.write_text(json.dumps({"schema": 2, "measurements": rows}))
-    assert dispatch.default_workers(p, "cuda") == 2  # 2 / 12 > 1 / 10 > 4 / 30 fits per second
-    assert dispatch.default_workers(p, "cpu") == 1
+def _count(spec, data):
+    data["cache"]["calls"] = data["cache"].get("calls", 0) + 1
+    return data["cache"]["calls"]
+
+
+def test_a_warm_up_unit_runs_in_each_worker_before_the_timed_units_and_one_worker_is_the_default():
+    assert dispatch.run(_count, ["a", "b"], {}, warmup="w") == [2, 3]  # call 1 was the warm-up
+    assert dispatch.run(_count, ["a", "b"], {}) == [1, 2]
+    import inspect
+    assert inspect.signature(dispatch.run).parameters["workers"].default == 1
+    assert inspect.signature(run.run).parameters["workers"].default == 1
 
 
 def test_timing_probe_writes_per_fit_and_concurrent_measurements_in_the_existing_schema(tmp_path):

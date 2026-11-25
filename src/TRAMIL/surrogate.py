@@ -5,13 +5,17 @@ corrector and intensity in place of the toy readout.
 
 Flags: permuted (Ec. 37 target, E2/E5 control), mu_R = 0 (untargeted, exploratory), log_n (prompt-only model of v07
 E5: the input is the prompt rows and log N_b enters every item head), prior = "text" (r12 reference: reads R^c_b and
-G_b at inference, no surrogate map)."""
+G_b at inference, no surrogate map).
+
+Batched (T6b): every forward takes a padded batch (item_training.collate/take) with an instance mask; centering,
+graphs and softmaxes run over the valid rows of each bag only (masked_center, masked_graph, masked_softmax), so the
+outputs equal the per-bag model for any padding. A lone bag is run as a batch of one."""
 import math
 
 import torch
 from torch import nn
 
-from .poc_graph_penalty import center, prior_graph
+from .item_training import batch_of
 
 __provenance__ = {
     "revision": "research-concept-residual-semantic-prior-bipartite-mil-r22.md",
@@ -31,6 +35,9 @@ __provenance__ = {
         "prompt_only_model_reads_prompt_rows_and_log_bag_size_in_every_head",
         "r12_reference_reads_the_prompt_prior_and_graph_at_inference",
         "every_flag_trains_one_epoch_with_finite_predictions",
+        "batched_forward_equals_the_per_bag_models",
+        "batched_loss_and_gradients_equal_the_per_bag_sum",
+        "extra_padding_never_changes_outputs_or_gradients",
     ],
 }
 
@@ -51,9 +58,40 @@ class InputEncoder(nn.Module):
         return torch.relu(self.fc(self.drop(Y)))
 
 
+def masked_center(X, mask):
+    """X - (per-bag mean over the valid rows), padded rows set to 0; X [B, N, c], mask [B, N] (Ec. 90, 115)."""
+    w = mask.unsqueeze(-1).to(X.dtype)
+    return (X - (X * w).sum(1, keepdim=True) / w.sum(1, keepdim=True)) * w
+
+
+def masked_graph(X, mask, eps=EPS):
+    """Cosine graph of the per-bag centered rows (Ec. 70, 71, 116); entries touching a padded row are 0."""
+    Xc = masked_center(X, mask)
+    n = Xc.norm(dim=-1, keepdim=True)
+    return (Xc @ Xc.transpose(1, 2)) / (n * n.transpose(1, 2) + eps)
+
+
+def masked_softmax(L, valid, dim):
+    """Softmax along dim over the valid entries only (valid broadcasts against L); padded entries get 0."""
+    return torch.softmax(L.masked_fill(~valid, float("-inf")), dim=dim)
+
+
+def pool(A, V):
+    """sum_i A_bij V_bi per bag: [B, N, 8] x [B, N, h] -> [B, 8, h] (Ec. 21)."""
+    return A.transpose(1, 2) @ V
+
+
+def unbatch(out, single):
+    if not single:
+        return out
+    if isinstance(out, dict):
+        return {k: (v[0] if torch.is_tensor(v) and v.dim() > 0 else v) for k, v in out.items()}
+    return out[0]
+
+
 class ItemHeads(nn.Linear):
-    """s_hat_j = w_j . z_j + c_j (Ec. 75): row j of the weight is head j; a single pooled vector z (h,) feeds every
-    head. PyTorch default initialization of a Linear(h, 8)."""
+    """s_hat_j = w_j . z_j + c_j (Ec. 75): row j of the weight is head j; Z is [B, 8, h] (one vector per item) or
+    [B, 1, h] (one pooled vector for every head). PyTorch default initialization of a Linear(h, 8)."""
 
     def __init__(self, h=H, j=J):
         super().__init__(h, j)
@@ -82,37 +120,47 @@ class SurrogateModel(nn.Module):
         self.heads = ItemHeads()
         self.g = nn.Parameter(torch.zeros(J)) if log_n else None
 
-    def surrogate_rows(self, H_):
-        """R_hat = sigmoid(H W_r + b_r) (Ec. 114) and its per-bag centering (Ec. 115)."""
-        return center(torch.sigmoid(self.W_r(H_)))
+    def surrogate_rows(self, H_, mask):
+        """R_hat = sigmoid(H W_r + b_r) (Ec. 114) and its per-bag centering over the valid rows (Ec. 115)."""
+        return masked_center(torch.sigmoid(self.W_r(H_)), mask)
 
-    def parts(self, b):
+    def _parts(self, b):
+        m = b["mask"]
         H_ = self.enc(b["Y"])
         if self.prior == "surrogate":
-            Rc_hat = self.surrogate_rows(H_)
-            P, E = Rc_hat, prior_graph(Rc_hat, EPS)  # Ec. 116 (prior_graph centers, a no-op here)
+            Rc_hat = self.surrogate_rows(H_, m)
+            P, E = Rc_hat, masked_graph(Rc_hat, m)  # Ec. 116 (the graph re-centers, a no-op here)
         else:
             Rc_hat, P, E = None, b["Rc"], b["G"]  # r12 reference: prompt prior and Ec. 70 graph at inference
-        Delta = prior_graph(self.W_a(H_), EPS) / TAU_A * offdiag(len(H_), H_)  # Ec. 104, 71
-        Pi = torch.softmax(Delta + KAPPA / TAU_E * E, dim=1)  # Ec. 72, 73
+        Delta = masked_graph(self.W_a(H_), m) / TAU_A * offdiag(H_.shape[1], H_)  # Ec. 104, 71
+        Pi = masked_softmax(Delta + KAPPA / TAU_E * E, m[:, None, :], dim=2)  # Ec. 72, 73: rows over valid columns
         Ht = H_ + torch.tanh(self.W_g(Pi @ H_))  # Ec. 74
         D = self.W_o(torch.tanh(self.W_v(Ht)))  # Ec. 15, 16
         L = D + nn.functional.softplus(self.rho) / TAU * P  # Ec. 17, 18
-        A = torch.softmax(L, dim=0)  # Ec. 20
-        s_hat = self.heads(A.T @ Ht)  # Ec. 21, 75
+        A = masked_softmax(L, m[:, :, None], dim=1)  # Ec. 20: per item over the valid segments
+        s_hat = self.heads(pool(A, Ht))  # Ec. 21, 75
         if self.g is not None:
-            s_hat = s_hat + self.g * b["logN"]
+            s_hat = s_hat + self.g * b["logN"][:, None]
         return {"s_hat": s_hat, "H": H_, "Rc_hat": Rc_hat, "E": E, "Delta": Delta, "Pi": Pi, "A": A}
 
+    def parts(self, b):
+        bb, single = batch_of(b)
+        return unbatch(self._parts(bb), single)
+
     def forward(self, b):
-        return self.parts(b)["s_hat"]
+        bb, single = batch_of(b)
+        return unbatch(self._parts(bb)["s_hat"], single)
 
     def fit_terms(self, b):
-        """(s_hat, mu_R ||R_hat^c - R^c||_F^2 / (8 N_b)) with H held constant inside the penalty (Ec. 77), so its
-        gradient reaches W_r, b_r only; the target is R^c_b or its permuted version (Ec. 37)."""
-        out = self.parts(b)
+        """(s_hat, mu_R ||R_hat^c_b - R^c_b||_F^2 / (8 N_b) per bag) with H held constant inside the penalty (Ec. 77),
+        so its gradient reaches W_r, b_r only; the target is R^c_b or its permuted version (Ec. 37)."""
+        bb, single = batch_of(b)
+        out = self._parts(bb)
         if self.prior != "surrogate" or self.mu_R == 0.0:
-            return out["s_hat"], 0.0
-        target = b["Rc_perm"] if self.permuted else b["Rc"]
-        Rc_hat = self.surrogate_rows(out["H"].detach())
-        return out["s_hat"], self.mu_R * (Rc_hat - target).pow(2).sum() / (J * len(target))
+            return unbatch(out["s_hat"], single), 0.0
+        target = bb["Rc_perm"] if self.permuted else bb["Rc"]
+        m = bb["mask"]
+        Rc_hat = self.surrogate_rows(out["H"].detach(), m)
+        err = ((Rc_hat - target) * m.unsqueeze(-1)).pow(2).sum((1, 2))
+        pen = self.mu_R * err / (J * bb["N"].to(err.dtype))
+        return unbatch(out["s_hat"], single), unbatch(pen, single)
