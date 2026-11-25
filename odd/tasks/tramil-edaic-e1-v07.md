@@ -38,8 +38,8 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
 - [x] T2 Models on real bags: acoustic surrogate (Ec. 114-116) with normalized penalty mu_R=1/vbar; 8-item-head
       ABMIL-8, Gated ABMIL-8, r06-8, ABMIL+R-8 (Ec. 79), Symptom-Guided; PCA front end (Ec. 94) + dropout,
       k=768 arm. Route: delegated (writer).
-- [ ] T3 Shared HPO (Ec. 102) frozen per outer fold to JSON. Route: delegated.
-- [ ] T4 Statistics: pooled OOF AUROC (Ec. 82/83), vectorized shared bootstrap B=9999 (Ec. 85), NI (Ec. 86),
+- [x] T3 Shared HPO (Ec. 102) frozen per outer fold to JSON. Route: delegated.
+- [x] T4 Statistics: pooled OOF AUROC (Ec. 82/83), vectorized shared bootstrap B=9999 (Ec. 85), NI (Ec. 86),
       DeLong (Ec. 84), Ec. 91 rule, Ec. 100/87; SS^omega (Ec. 93). Route: delegated.
 - [ ] T5 Permutation runner (Ec. 91) with reduced protocol, unit (perm, fold, arm). Route: delegated.
 - [ ] T6 GPU throughput: tensors on device, N worker processes per GPU over independent units, cuda.synchronize.
@@ -69,5 +69,14 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
   k=768 vs stated 28,233). Symptom-Guided = 32k+752. Prompt-only uses PCA k=8 rotation per v07 E5.
   Gotcha: concurrent pytest runs sharing --basetemp wipe each other's tmp dirs.
 
+- T3 done, commit 1030e7f (route: delegated writer). hpo.py: units (rep, fold, arm, k, p, inner) -> pure run_unit ->
+  deterministic reduce (Ec. 39 objective, k* = argmax_k mean over E1 neural arms of max_p, per-arm p*, ties smaller k
+  then p; prompt_only at k=8; p768 for the full model at k=768) -> hpo_r{rep}_f{fold}.json + load_frozen.
+  TDD: RED collection error (8 tests) -> GREEN 8 passed.
+- T4 done, commit c9ee0e8 (route: delegated writer). pooled_stats.py: Ec. 82/83, shared stratified bootstrap with
+  vectorized rank AUROC (B=9999 x 8 models x 3 reps in ~3.3 s CPU), lower bounds, Ec. 86 verdict, DeLong (hand
+  example Var=0.625), Ec. 91 rule + p=(b+1)/24, Ec. 100, Ec. 87, SS^omega + bootstrap (cross-checked with poc_e0.ss_w).
+  TDD: RED collection error (13 tests) -> GREEN 13 passed. Full suite 197 passed, 3 skipped; test_poc_e0b.py green.
+
 ## Next step
-T3 shared HPO (Ec. 102) on top of e1_arms/frontend/item_training.
+T5 permutation runner (Ec. 91) reusing hpo.load_frozen, item_training.permute_items and pooled_stats.assay.
