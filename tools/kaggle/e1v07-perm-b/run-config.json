@@ -1,0 +1,90 @@
+{
+  "accelerator": {
+    "architectures": [
+      "sm_75"
+    ],
+    "kind": "cuda"
+  },
+  "clonePaths": [
+    "src/TRAMIL"
+  ],
+  "commit": "44a3cea143f0e830c622ee7f0fd9a8e66fc94eb9",
+  "environment": {
+    "install": {
+      "requirements": [
+        "sentence-transformers"
+      ]
+    }
+  },
+  "inputDatasets": [
+    "alejopatio/tramil-edaic-features",
+    "alejopatio/tramil-edaic-instances"
+  ],
+  "jobName": "e1v07-perm-b",
+  "product": "TRAMIL",
+  "repo": {
+    "ref": "feat/edaic-e1-v07",
+    "url": "https://github.com/AlejoPatigno/TRAMIL.git"
+  },
+  "run": {
+    "function": "run",
+    "kwargs": {
+      "phases": "perm",
+      "shard": "2/2",
+      "workers": 4
+    },
+    "module": "TRAMIL.e1v07_run",
+    "smoke": {
+      "function": "run",
+      "kwargs": {
+        "K": [
+          16
+        ],
+        "P": [
+          0.0
+        ],
+        "arms": [
+          "full"
+        ],
+        "import_from_inputs": false,
+        "kstar_arms": [
+          "full"
+        ],
+        "limit_bags": 40,
+        "max_epochs": 1,
+        "phases": [
+          "search",
+          "real",
+          "perm"
+        ],
+        "r_pi": 1,
+        "reps": 1,
+        "seeds": [
+          11
+        ],
+        "workers": 1
+      },
+      "module": "TRAMIL.e1v07_run",
+      "requiredEvidence": [
+        "evidence.commit",
+        "environment.device.kind"
+      ]
+    }
+  },
+  "runnerTemplate": [
+    {
+      "path": "assets/runner_bootstrap.py",
+      "sha256": "73e2bafc07319a244ee1d6ecc054c95ab2953f7ebfde4ee92ae0af973a5ed530"
+    },
+    {
+      "path": "assets/runner_invoke.py",
+      "sha256": "ff5bd75d8bc0ba24ec68adc3b612590cd9efb787d76ea2b02314d0c1fee37db2"
+    }
+  ],
+  "schemaVersion": 1,
+  "service": "kaggle",
+  "unresolvedReads": [
+    "C:\\Users\\LOQ\\Desktop\\TCAMIL_extension\\implementations\\TRAMIL\\src\\TRAMIL\\e1v07_run.py:221: f.read_text() \u2014 read call on a path that could not be resolved",
+    "C:\\Users\\LOQ\\Desktop\\TCAMIL_extension\\implementations\\TRAMIL\\src\\TRAMIL\\e1v07_run.py:105: (out / 'real' / f'r0_f{fold}_svm_s0.json').read_text() \u2014 read call on a path that could not be resolved"
+  ]
+}
