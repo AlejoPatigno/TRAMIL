@@ -8,7 +8,7 @@
   "clonePaths": [
     "src/TRAMIL"
   ],
-  "commit": "5348f7b84b05775f62e6b2c83a608318aecb8228",
+  "commit": "ebf6647fe5871c0b20800f33e06eb07c3530a395",
   "environment": {
     "install": {
       "requirements": [
@@ -31,7 +31,7 @@
     "kwargs": {
       "phases": "real",
       "shard": "1/2",
-      "workers": 4
+      "workers": 2
     },
     "module": "TRAMIL.e1v07_run",
     "smoke": {
