@@ -90,7 +90,7 @@ def predict(m, bags):
 def val_mse(m, bags, ow):
     """Ec. 39 inner-fold objective: class-weighted item MSE without the penalty."""
     P = torch.from_numpy(predict(m, bags))
-    S = torch.stack([b["s"] for b in bags]).double()
+    S = torch.stack([b["s"].cpu() for b in bags]).double()  # bags may be preloaded on the GPU; P is on the CPU
     return float(weighted_item_mse(P, S, [b["y"] for b in bags], ow))
 
 
