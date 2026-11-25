@@ -95,3 +95,34 @@ def test_a_real_unit_never_reads_its_outer_test_subjects_for_fitting(done, data)
     b = run.run_unit(spec, {"items": items, "Q": data["Q"], "cache": {}})
     assert a["epoch"] == b["epoch"] and a["curves"] == b["curves"]  # fitting and epoch choice never read the test fold
     assert set(a["oof"]) == {str(data["items"][i]["subject"]) for i in test} and a["oof"] != b["oof"]
+
+
+SMALL = dict(reps=1, seeds=(11,), K=(2,), P=(0.0,), max_epochs=1, r_pi=1, arms=("full",), kstar_arms=("full",))
+
+
+def test_kernel_output_wavlm_cache_is_discovered_below_the_input_root(tmp_path):
+    deep = tmp_path / "notebooks" / "alejopatio" / "papersmith-extract-wavlm" / "clone" / "TRAMIL" / "Data" / "features"
+    deep.mkdir(parents=True)
+    (deep / "300_W.npy").write_bytes(b"")
+    ds = tmp_path / "datasets" / "alejopatio" / "tramil-edaic-features"
+    ds.mkdir(parents=True)
+    (ds / "300_E.npy").write_bytes(b"")
+    (ds / "300_X.npy").write_bytes(b"")
+    inst = tmp_path / "datasets" / "alejopatio" / "tramil-edaic-instances"
+    inst.mkdir(parents=True)
+    (inst / "detailed_lables.csv").write_text("x")
+    (inst / "instances_clean.csv").write_text("x")
+    found = run.find_inputs([tmp_path])
+    assert found["features"] == deep and found["text"] == ds and found["labels"].parent == inst
+
+
+def test_sharded_search_kernels_feed_a_real_kernel_through_mounted_outputs(tmp_path, data):
+    for i in (1, 2):
+        run.run_phase("search", data, tmp_path / f"in{i}" / "clone" / "TRAMIL" / "Results" / "E1_v07", shard=f"{i}/2",
+                      **SMALL)
+    out = tmp_path / "out"
+    copied = run.import_upstream([tmp_path / "in1", tmp_path / "in2"], out)
+    assert copied == len(run.units("search", out, **SMALL)) and not (out / "hpo").exists()
+    assert run.import_upstream([tmp_path / "in1"], out) == 0  # existing files are never overwritten
+    res = run.run_phase("real", data, out, **SMALL)
+    assert len(list((out / "hpo").glob("hpo_r0_f*.json"))) == 5 and len(res["ran"]) == 15

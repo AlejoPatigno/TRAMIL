@@ -21,6 +21,7 @@ CLI: python -m TRAMIL.e1v07_run {search,real,perm,report} [--out DIR] [--input R
 import argparse
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -41,6 +42,8 @@ __provenance__ = {
         "shards_partition_the_units_and_an_explicit_list_restricts_them",
         "permutation_units_use_repetition_one_seed_11_and_move_item_scores_as_a_unit",
         "a_real_unit_never_reads_its_outer_test_subjects_for_fitting",
+        "kernel_output_wavlm_cache_is_discovered_below_the_input_root",
+        "sharded_search_kernels_feed_a_real_kernel_through_mounted_outputs",
     ],
 }
 
@@ -237,11 +240,11 @@ def run_phase(phase, data, out, workers=1, shard=None, only=None, **cfg):
     if phase == "report":
         rep = report(data, out, **c)
         return {"ran": ["report"], "report": rep}
+    _freeze_complete(out, c)  # search units imported from other shards' kernels
     specs = select(units(phase, out, **c), shard, only)
     pending = [s for s in specs if not (out / phase / f"{uid(s)}.json").exists()]
     dispatch.run(run_unit, pending, data, workers, on_result=lambda s, r: _write(out / phase / f"{uid(s)}.json", r))
-    if phase == "search":
-        _freeze_complete(out, c)
+    _freeze_complete(out, c)
     return {"ran": [uid(s) for s in pending], "skipped": len(specs) - len(pending)}
 
 
@@ -422,26 +425,95 @@ def _markdown(js):
     return "\n".join(md) + "\n"
 
 
-# ---------------- CLI ----------------
+# ---------------- remote entry ----------------
+KAGGLE_INPUT = "/kaggle/input"
+RESULT_DIRS = ("search", "hpo", "real", "perm")
+
+
+def find_inputs(roots):
+    """Labels, instances CSV, the WavLM _W.npy folder and the text _E.npy folder below the roots (os.walk). The WavLM
+    cache is the output of the extract-wavlm kernel, mounted as a kernel source at
+    <root>/notebooks/<owner>/<slug>/clone/TRAMIL/Data/features, deeper than a dataset."""
+    from . import e1_run
+
+    return e1_run._find(roots, depth=10, acoustic="wavlm")
+
+
+def _input_roots(input_root=None):
+    if input_root:
+        return [input_root]
+    mounted = json.loads(os.environ.get("FORGE_INPUT_DATASETS") or "{}")
+    roots = [v for v in mounted.values() if v]
+    if Path(KAGGLE_INPUT).is_dir():
+        roots.append(KAGGLE_INPUT)
+    return roots or ["TRAMIL/Data"]
+
+
+def import_upstream(roots, out):
+    """Copy earlier kernels' unit results (every E1_v07/{search,hpo,real,perm}/*.json found below the roots) into out;
+    an existing file is never overwritten. Returns the number of files copied."""
+    out, n = Path(out), 0
+    for root in map(Path, roots):
+        if not root.is_dir():
+            continue
+        for here, dirs, _ in os.walk(root):
+            dirs[:] = [d for d in dirs if not d.startswith(("instances_audio", "src", "."))]
+            if Path(here).name != "E1_v07" or Path(here).resolve() == out.resolve():
+                continue
+            for sub in RESULT_DIRS:
+                for f in sorted((Path(here) / sub).glob("*.json")):
+                    dst = out / sub / f.name
+                    if not dst.exists():
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy(f, dst)
+                        n += 1
+            dirs[:] = []
+    return n
+
+
 def load_data(input_root=None, limit_bags=None):
     """WavLM bags with item scores and prompt priors, plus the descriptor embeddings Q (Symptom-Guided)."""
-    from . import e1_run, exp_e1, features
+    from . import exp_e1, features
 
     env = os.environ
     if all(env.get(k) for k in ("TRAMIL_LABELS", "TRAMIL_EDAIC", "TRAMIL_FEATURES")):
         labels, edaic, feats = env["TRAMIL_LABELS"], env["TRAMIL_EDAIC"], env["TRAMIL_FEATURES"]
         text = env.get("TRAMIL_TEXT") or feats
     else:
-        found = e1_run._find([input_root] if input_root else e1_run._default_roots("wavlm"), acoustic="wavlm")
+        found = find_inputs(_input_roots(input_root))
         labels, edaic, feats, text = found["labels"], found["instances"].parent, found["features"], found["text"]
     items, info = exp_e1.load_items(labels, edaic, Path(feats), limit_bags, acoustic="wavlm", text_dir=text)
     return {"items": items, "Q": features.embed_texts(features.DESCRIPTORS)}, info
 
 
+def _default_out():
+    return Path(os.environ.get("FORGE_CLONE_ROOT", ".")) / "TRAMIL" / "Results" / "E1_v07"
+
+
+def run(phases, out_dir=None, input_root=None, shard=None, units=None, workers=None, limit_bags=None,
+        import_from_inputs=True, **cfg):
+    """Remote callable (run-config.json): phases is one phase or a list run in order (a smoke chains them at a tiny
+    scale). Earlier kernels' results mounted under the input roots are imported first; shard.json under the runner."""
+    from . import e1_run
+
+    phases = [phases] if isinstance(phases, str) else list(phases)
+    out = Path(out_dir) if out_dir else _default_out()
+    out.mkdir(parents=True, exist_ok=True)
+    imported = import_upstream(_input_roots(input_root), out) if import_from_inputs else 0
+    data, info = load_data(input_root, limit_bags)
+    workers = workers or dispatch.default_workers(out.parent / "timing.json", item_training.device().type)
+    summary = {"imported": imported, "workers": workers, "shard": shard, **info}
+    for ph in phases:
+        res = run_phase(ph, data, out, workers=workers, shard=shard, only=units, **cfg)
+        summary[ph] = {"ran": len(res["ran"]), "skipped": res.get("skipped", 0)}
+    e1_run._stamp(summary)
+    return summary
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m TRAMIL.e1v07_run")
     ap.add_argument("phase", choices=PHASES)
-    ap.add_argument("--out", default=str(Path(os.environ.get("FORGE_CLONE_ROOT", ".")) / "TRAMIL" / "Results" / "E1_v07"))
+    ap.add_argument("--out", default=str(_default_out()))
     ap.add_argument("--input")
     ap.add_argument("--shard")
     ap.add_argument("--units")
@@ -450,13 +522,9 @@ def main(argv=None):
     ap.add_argument("--max-epochs", type=int, default=item_training.MAX_EPOCHS)
     ap.add_argument("--r-pi", type=int, default=R_PI)
     a = ap.parse_args(argv)
-    data, info = load_data(a.input, a.limit_bags)
-    workers = a.workers or dispatch.default_workers(Path(a.out).parent / "timing.json", item_training.device().type)
-    res = run_phase(a.phase, data, a.out, workers=workers, shard=a.shard,
-                    only=a.units.split(",") if a.units else None, max_epochs=a.max_epochs, r_pi=a.r_pi)
-    print(json.dumps({"phase": a.phase, "ran": len(res["ran"]), "skipped": res.get("skipped", 0), "workers": workers,
-                      **info}))
-
+    res = run(a.phase, a.out, a.input, a.shard, a.units.split(",") if a.units else None, a.workers, a.limit_bags,
+              max_epochs=a.max_epochs, r_pi=a.r_pi)
+    print(json.dumps(res))
 
 if __name__ == "__main__":
     main()

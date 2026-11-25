@@ -79,20 +79,32 @@ def probe(data, path, arms=ARMS, epochs=2, budget=item_training.MAX_EPOCHS, work
     return rows
 
 
+def run(out=None, input_root=None, arms=ARMS, epochs=2, budget=item_training.MAX_EPOCHS, workers=(1, 2, 4, 8), k=128,
+        limit_bags=None):
+    """Remote callable (run-config.json): probe on the real WavLM bags; shard.json under the runner."""
+    from . import e1_run
+
+    out = Path(out) if out else Path(os.environ.get("FORGE_CLONE_ROOT", ".")) / "TRAMIL" / "Results" / "timing.json"
+    data, info = e1v07_run.load_data(input_root, limit_bags)
+    rows = probe(data, out, tuple(arms), epochs, budget, tuple(workers), k)
+    summary = {"rows": rows, **info}
+    e1_run._stamp(summary)
+    return summary
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m TRAMIL.timing_v07")
-    ap.add_argument("--out", default=str(Path(os.environ.get("FORGE_CLONE_ROOT", ".")) / "TRAMIL" / "Results" /
-                                         "timing.json"))
+    ap.add_argument("--out")
     ap.add_argument("--input")
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--budget", type=int, default=item_training.MAX_EPOCHS)
     ap.add_argument("--workers", default="1,2,4,8")
     ap.add_argument("--arms", default=",".join(ARMS))
+    ap.add_argument("--limit-bags", type=int)
     a = ap.parse_args(argv)
-    data, _ = e1v07_run.load_data(a.input)
-    rows = probe(data, a.out, a.arms.split(","), a.epochs, a.budget, tuple(int(n) for n in a.workers.split(",")))
-    print(json.dumps(rows, indent=1))
-
+    res = run(a.out, a.input, a.arms.split(","), a.epochs, a.budget, [int(n) for n in a.workers.split(",")],
+              limit_bags=a.limit_bags)
+    print(json.dumps(res["rows"], indent=1))
 
 if __name__ == "__main__":
     main()
