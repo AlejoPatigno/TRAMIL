@@ -3,7 +3,7 @@
   "stage": "poc",
   "protocol": "experiments/experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v05.md",
   "generated_at": "2026-11-25T04:54:38Z",
-  "summary": "Proof of concept E0 (proposal r22, H8) on synthetic bags, run on Kaggle CPU at the declared scale (gate 0: 6 configurations x 5 seeds; arms: 10 seeds x 3 trained arms x 2 strengths, up to 400 epochs). It replaces the r12 proof of concept (E1 on E-DAIC, all arms at chance), whose record stays in Results/E1_full.md and git history. Gate 0 passed (1.2199 vs constant 1.2642). P1, P2 and P4 are supported under the pre-registered rules, so H8 is carried forward, but the margins are thin: P1 and P2a both sit at Holm-adjusted p 0.0488, the bootstrap interval of the P2a mean difference crosses zero, and the per-item Spearman between the surrogate and the prompt prior is near zero for every arm, so the surrogate-error gain reads as shrinkage toward the prior rather than recovery of it. P3: removing text at inference costs 0.116 SS^w [0.071, 0.163]; the full model keeps about 17% of the r12 reference skill.",
+  "summary": "Proof of concept E0 (proposal r22, H8) on synthetic bags, run on Kaggle CPU at the declared scale. Gate 0 passed and P1, P2, P4 are supported under the pre-registered rules, but a post-run diagnosis shows the verdicts are early-stopping artifacts: the surrogate arms were restored at epoch 1-2 and the penalty was negligible against the low-variance prompt prior, so no arm recovers the prior (per-item Spearman ~0). E0 therefore does not test the H8 mechanism; a redesigned E0b (normalized penalty, lr per arm, early stopping, rho sweep, Spearman test P2c) is pre-registered in odd/tasks/tramil-poc-e0b.md and replaces it as the gate for E-DAIC.",
   "discussion_type": [
     "ablation",
     "comparative",
@@ -40,7 +40,7 @@
         "Results/poc_e0.json"
       ],
       "verdict": "supported",
-      "rationale": "Adjusted p is below alpha, by 0.0012; one of ten seeds is negative (-0.055). Supported under the rule, with a thin margin."
+      "rationale": "Adjusted p is below alpha, by 0.0012; one of ten seeds is negative (-0.055). Supported under the rule, with a thin margin. Post-run diagnosis (2026-11-25): the full arm was restored at its best val epoch 1-2 in all 20 runs (untargeted 1-6), because the lr 0.01 chosen by gate 0 on the graph-free model overfits the surrogate arms from epoch 1; the penalty was negligible because Rc has variance ~1.2e-4 (zero predictor error 0.00012 vs full 0.0015); an oracle surrogate reaches Spearman 0.517, so the near-zero Spearman is real, not a computation error."
     },
     {
       "id": "E0-P2",
@@ -55,7 +55,7 @@
         "Results/poc_e0.json"
       ],
       "verdict": "supported",
-      "rationale": "Both tests pass after Holm. P2a is fragile: its adjusted p equals P1's at 0.0488 and the bootstrap interval of the mean difference includes zero. P2b is clear, but the near-zero per-item Spearman of every arm suggests the lower error comes from shrinking Rhat_c toward the low-variance Rc rather than from recovering the item identity."
+      "rationale": "Both tests pass after Holm. P2a is fragile: its adjusted p equals P1's at 0.0488 and the bootstrap interval of the mean difference includes zero. P2b is clear, but the near-zero per-item Spearman of every arm suggests the lower error comes from shrinking Rhat_c toward the low-variance Rc rather than from recovering the item identity. Post-run diagnosis (2026-11-25): the full arm was restored at its best val epoch 1-2 in all 20 runs (untargeted 1-6), because the lr 0.01 chosen by gate 0 on the graph-free model overfits the surrogate arms from epoch 1; the penalty was negligible because Rc has variance ~1.2e-4 (zero predictor error 0.00012 vs full 0.0015); an oracle surrogate reaches Spearman 0.517, so the near-zero Spearman is real, not a computation error."
     },
     {
       "id": "E0-P4",
@@ -70,21 +70,22 @@
         "Results/poc_e0.json"
       ],
       "verdict": "supported",
-      "rationale": "The interval contains zero; the penalty adds no SS^w when the audio carries no prompt information. Absence of evidence with n = 10, not evidence of equivalence."
+      "rationale": "The interval contains zero; the penalty adds no SS^w when the audio carries no prompt information. Absence of evidence with n = 10, not evidence of equivalence. Post-run diagnosis (2026-11-25): the full arm was restored at its best val epoch 1-2 in all 20 runs (untargeted 1-6), because the lr 0.01 chosen by gate 0 on the graph-free model overfits the surrogate arms from epoch 1; the penalty was negligible because Rc has variance ~1.2e-4 (zero predictor error 0.00012 vs full 0.0015); an oracle surrogate reaches Spearman 0.517, so the near-zero Spearman is real, not a computation error."
     }
   ],
   "novelty": {
     "claim": "Distilling the interviewer-prompt prior into acoustics, with text as training-only privileged information (pillar C3, r22), improves the item profile over the same model without the penalty and does nothing when the audio does not carry the prior.",
-    "verdict": "partially_justified",
+    "verdict": "not_justified",
     "evidence": [
       "Results/poc_e0.md",
       "Results/poc_e0.json"
     ],
-    "rationale": "The pre-registered ablation (full vs untargeted) and the negative control pass, so the existence proof holds on synthetic bags. But the SS^w gain is small (0.008) with an interval crossing zero, and the per-item Spearman shows no recovery of the prior even at rho = 0.5, so the mechanism the claim names is not demonstrated. The cost of removing text (P3) is large."
+    "rationale": "The pre-registered tests pass, but the diagnosis shows the compared models are near their initialization, so the ablation does not isolate the distillation mechanism and the claim is not justified by E0. E0b is its replacement."
   },
   "qualitative": [],
-  "qualitative_not_applicable": "The pre-registered per-item fidelity heatmap was not rendered as a figure; its numbers are in poc_e0.json (arms.*.spearman). Seed-mean per-item Spearman of Rhat_c vs Rc: full rho 0.5 0.0014 (sd 0.0115), untargeted rho 0.5 -0.0074, full rho 0 0.0033, untargeted rho 0 -0.0014; max |rho_s| 0.098. The full model is marginally above the untargeted arm at rho 0.5, but no arm shows structure, which fails the qualitative expectation that the full model recovers the prior.",
+  "qualitative_not_applicable": "The pre-registered per-item fidelity heatmap was not rendered as a figure; its numbers are in poc_e0.json (arms.*.spearman). Seed-mean per-item Spearman of Rhat_c vs Rc: full rho 0.5 0.0014 (sd 0.0115), untargeted rho 0.5 -0.0074, full rho 0 0.0033, untargeted rho 0 -0.0014; max |rho_s| 0.098. The full model is marginally above the untargeted arm at rho 0.5, but no arm shows structure, which fails the qualitative expectation that the full model recovers the prior. The diagnosis also found the full arm's surrogate error 12x above the zero predictor's.",
   "limitations": [
+    "The P1 and P2 verdicts are early-stopping artifacts (best epoch 1-2 for the full arm); E0 does not test prior recovery.",
     "Synthetic bags only; nothing here transfers to E-DAIC.",
     "Generator variant deviates from experiments v05 (identity enters audio only through rho * p[z], shared severity direction, no prompt/audio disagreement); to be recorded in experiments v06.",
     "Weak signal by construction: logistic decodability of z is about 0.23 at rho 0.5 (chance 0.125), and the prompt prior Rc has very low variance (0.03 one-hot plus noise), which makes surrogate error a weak proxy for recovery.",
@@ -92,9 +93,9 @@
     "Convergence curves, fidelity heatmap and interval plots were not rendered as figures."
   ],
   "next_steps": [
-    "Record the generator deviation and the E0 outcome in experiments v06 and align E1-E9 with r22.",
-    "Before E-DAIC, check why the surrogate does not recover the prior (Spearman near zero): verify the Spearman computation, and consider a rho or Rc-variance sweep.",
-    "Render the pre-registered figures from poc_e0.json (curves, per-item heatmap, paired-difference intervals)."
+    "Run E0b (pre-registered, Kaggle CPU) and replace this discussion with its reading.",
+    "Record the E0 generator deviation, the E0 diagnosis and the E0b design in experiments v06, and align E1-E9 with r22.",
+    "Render the pre-registered figures from the E0b results."
   ],
   "available_evidence": {
     "figures": [],
@@ -108,7 +109,7 @@
   },
   "contribution_type": {
     "type": "Concept & Feasibility",
-    "why": "E0-P1, E0-P2 and E0-P4 are supported only on synthetic bags, with E0-P1 and E0-P2a at adjusted p 0.0488 and novelty partially_justified: the training-only distillation idea is shown feasible at pilot scale, while the mechanism (prior recovery, per-item Spearman near zero) and any real-data benefit remain unshown.",
+    "why": "E0-P1, E0-P2 and E0-P4 pass under their rules, but the post-run diagnosis makes the novelty not_justified: the models were near initialization and no prior recovery was shown. At most a feasibility probe of the pipeline; the concept awaits E0b.",
     "affinity": {
       "General": {
         "score": 30,
@@ -123,12 +124,12 @@
         "why": "Motivated by depression screening from interviews, but no E-DAIC result supports the use case yet."
       },
       "Concept & Feasibility": {
-        "score": 80,
+        "score": 55,
         "why": "A pilot-scale synthetic proof that the penalty-trained surrogate helps when audio carries the prior and not otherwise (E0-P1, E0-P2, E0-P4)."
       },
       "Negative Results": {
-        "score": 25,
-        "why": "The prior r12 E1 was at chance and E0 shows no prior recovery, but the central E0 verdicts are supported, so the findings are not primarily negative."
+        "score": 40,
+        "why": "The diagnosis is a negative finding about the E0 design, but the mechanism itself was not tested, so it is not a negative result on the idea."
       }
     }
   }
