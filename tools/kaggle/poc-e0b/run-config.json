@@ -1,0 +1,52 @@
+{
+  "accelerator": {
+    "architectures": [],
+    "kind": "cpu"
+  },
+  "carryPaths": [
+    "Results/e0b_runs"
+  ],
+  "clonePaths": [
+    "src/TRAMIL"
+  ],
+  "commit": "721f5421583ffaf7059cb48a994d176d15764b46",
+  "jobName": "poc-e0b",
+  "product": "TRAMIL",
+  "repo": {
+    "ref": "feat/poc-e0",
+    "url": "https://github.com/AlejoPatigno/TRAMIL.git"
+  },
+  "run": {
+    "function": "run_e0b",
+    "kwargs": {},
+    "module": "TRAMIL.poc_e0b",
+    "smoke": {
+      "function": "run_e0b",
+      "kwargs": {
+        "smoke": true
+      },
+      "module": "TRAMIL.poc_e0b",
+      "requiredEvidence": [
+        "evidence.commit",
+        "environment.device.kind"
+      ]
+    }
+  },
+  "runnerTemplate": [
+    {
+      "path": "assets/runner_bootstrap.py",
+      "sha256": "73e2bafc07319a244ee1d6ecc054c95ab2953f7ebfde4ee92ae0af973a5ed530"
+    },
+    {
+      "path": "assets/runner_invoke.py",
+      "sha256": "ff5bd75d8bc0ba24ec68adc3b612590cd9efb787d76ea2b02314d0c1fee37db2"
+    }
+  ],
+  "schemaVersion": 1,
+  "service": "kaggle",
+  "unresolvedReads": [
+    "/mnt/c/Users/LOQ/Desktop/TCAMIL_extension/implementations/TRAMIL/src/TRAMIL/poc_e0b.py:163: (Path(runs_dir) / f\"{u['id']}.json\").read_text(encoding='utf-8') \u2014 read call on a path that could not be resolved",
+    "/mnt/c/Users/LOQ/Desktop/TCAMIL_extension/implementations/TRAMIL/src/TRAMIL/poc_e0.py:364: (Path(runs_dir) / f\"{u['id']}.json\").read_text(encoding='utf-8') \u2014 read call on a path that could not be resolved",
+    "/mnt/c/Users/LOQ/Desktop/TCAMIL_extension/implementations/TRAMIL/src/TRAMIL/e1_run.py:134: f.read_text() \u2014 read call on a path that could not be resolved"
+  ]
+}
