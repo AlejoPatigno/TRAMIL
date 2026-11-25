@@ -46,7 +46,7 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
       Route: delegated.
 - [x] T7 Timing probe (local CPU smoke only; GPU run pending): per-fit and concurrent throughput (1,2,4,8 workers) for every arm -> Results/timing.json.
       Route: delegated; GPU measurement runs on Kaggle after operator go.
-- [ ] T8 Kaggle jobs e1-v07-{search,real,perm} with the WavLM dataset, smoke unit, merge/report scripts.
+- [ ] T8 (folders generated, launch pending operator go) Kaggle jobs e1-v07-{search,real,perm} with the WavLM dataset, smoke unit, merge/report scripts.
       Route: inline (remote-execution).
 - [ ] T9 G-EXP-POC evidence pack for the operator.
 
@@ -89,5 +89,12 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
   Results/timing.json (schema 2). TDD: RED 2 collection errors (9 tests) -> GREEN 9 passed (e2e synthetic ~40 s).
   Full suite 206 passed, 3 skipped; test_poc_e0b.py 7 passed. Local real timing probe not run (needs data/GPU).
 
+- T8 folders generated (route: delegated writer), commits 44a3cea (remote callables e1v07_run.run / timing_v07.run,
+  kernel-output WavLM discovery, upstream import; TDD RED 2 failed -> GREEN, full suite 208 passed, 3 skipped) and
+  the job-folder commit after it: tools/kaggle/e1v07-{timing,search-a,search-b,real-a,real-b,perm-a,perm-b,report}
+  + tools/kaggle/e1v07/README.md, pinned to 44a3cea, generated with jobfolder.generate_job offline (only the
+  pin-published probe bypassed: branch not pushed). Offline validation: all 8 read + validate_run_config OK, staleness
+  fresh, runner.ipynb equals current assets. Nothing submitted; push + operator go pending.
+
 ## Next step
-T7 GPU measurement on Kaggle, then T8 Kaggle jobs e1-v07-{search,real,perm} (needs operator go).
+Operator: push feat/edaic-e1-v07, then preflight + submit --smoke e1v07-timing (launch order in tools/kaggle/e1v07/README.md).
