@@ -19,8 +19,8 @@ Diagnosis on 2026-11-25: an oracle reaches Spearman 0.517. A linear ridge ceilin
 
 ## Tasks
 - [x] T1 Module src/TRAMIL/poc_e0b.py and tests/test_poc_e0b.py. TDD: RED was a collection error (module missing); GREEN is 7 passed. The E0 suite still passes (14).
-- [~] T2 Kaggle CPU job tools/kaggle/poc-e0b: smoke passed (smoke record pass, readiness true); full run submitted as alejopatio/papersmith-poc-e0b at pin 721f542, running. Smoke rehearsal, then the full run (authorized by the operator on 2026-11-25: "ponlo a ejecutar apenas lo tengas").
-- [ ] T3 Fetch, report, update Results/discussion.json, and record E0b in experiments v06.
+- [x] T2 Kaggle CPU job tools/kaggle/poc-e0b: smoke passed (smoke record pass, readiness true); full run submitted as alejopatio/papersmith-poc-e0b at pin 721f542, running. Smoke rehearsal, then the full run (authorized by the operator on 2026-11-25: "ponlo a ejecutar apenas lo tengas").
+- [x] T3 Fetch, report, update Results/discussion.json, and record E0b in experiments v06. Run complete (~6.5 h), fetch current. P1 supported, P2 partially (P2a fails; P2b, P2c pass), P4 supported, H8 not carried forward. discussion check: complete.
 
 ## Checks
 pytest tests/test_poc_e0b.py tests/test_poc_e0.py --basetemp=.pytest_tmp_e0b
