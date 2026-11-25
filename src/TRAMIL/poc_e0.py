@@ -375,8 +375,9 @@ def _low_time():
     return d is not None and float(d) - time.time() < DEADLINE_MARGIN_S
 
 
-def _run_units(units, runs_dir, workers):
+def _run_units(units, runs_dir, workers, fn=None):
     """Runs the uncached units; returns the ids still owed when the session deadline is near."""
+    fn = fn or _run_unit
     runs_dir.mkdir(parents=True, exist_ok=True)
     pending = deque(u for u in units if not (runs_dir / f"{u['id']}.json").exists())
     if not pending:
@@ -384,14 +385,14 @@ def _run_units(units, runs_dir, workers):
     workers = workers or min(14, os.cpu_count() or 1, len(pending))
     if workers <= 1:
         while pending and not _low_time():
-            _run_unit(pending[0], runs_dir)
+            fn(pending[0], runs_dir)
             pending.popleft()
         return [u["id"] for u in pending]
     inflight = set()
     with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker) as ex:
         while True:
             while pending and len(inflight) < workers and not _low_time():
-                inflight.add(ex.submit(_run_unit, pending.popleft(), runs_dir))
+                inflight.add(ex.submit(fn, pending.popleft(), runs_dir))
             if not inflight:
                 break
             done, inflight = wait(inflight, return_when=FIRST_COMPLETED)
