@@ -8,7 +8,7 @@
   "clonePaths": [
     "src/TRAMIL"
   ],
-  "commit": "15f438bc476e24bae910fe48425308eb3386bb8e",
+  "commit": "5348f7b84b05775f62e6b2c83a608318aecb8228",
   "environment": {
     "install": {
       "requirements": [
@@ -30,12 +30,10 @@
     "function": "run",
     "kwargs": {
       "budget": 80,
-      "epochs": 2,
+      "epochs": 3,
       "workers": [
         1,
-        2,
-        4,
-        8
+        2
       ]
     },
     "module": "TRAMIL.timing_v07",
@@ -72,6 +70,6 @@
   "schemaVersion": 1,
   "service": "kaggle",
   "unresolvedReads": [
-    "C:\\Users\\LOQ\\Desktop\\TCAMIL_extension\\implementations\\TRAMIL\\src\\TRAMIL\\timing_v07.py:57: p.read_text() \u2014 read call on a path that could not be resolved"
+    "C:\\Users\\LOQ\\Desktop\\TCAMIL_extension\\implementations\\TRAMIL\\src\\TRAMIL\\timing_v07.py:53: p.read_text() \u2014 read call on a path that could not be resolved"
   ]
 }
