@@ -44,6 +44,8 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
 - [x] T5 Permutation runner (Ec. 91) with reduced protocol, unit (perm, fold, arm). Route: delegated.
 - [x] T6 GPU throughput: tensors on device, N worker processes per GPU over independent units, cuda.synchronize.
       Route: delegated.
+- [x] T6b Batched padded training/prediction for every neural arm (instance mask, masked softmax/centering,
+      per-bag penalty), folds collated once on the device, one worker per GPU by default. Route: delegated.
 - [x] T7 Timing probe (local CPU smoke only; GPU run pending): per-fit and concurrent throughput (1,2,4,8 workers) for every arm -> Results/timing.json.
       Route: delegated; GPU measurement runs on Kaggle after operator go.
 - [ ] T8 (folders generated, launch pending operator go) Kaggle jobs e1-v07-{search,real,perm} with the WavLM dataset, smoke unit, merge/report scripts.
@@ -96,5 +98,15 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
   pin-published probe bypassed: branch not pushed). Offline validation: all 8 read + validate_run_config OK, staleness
   fresh, runner.ipynb equals current assets. Nothing submitted; push + operator go pending.
 
+- T6b done (operator-approved after the Kaggle T4 probe at 15f438b: per-bag loop launch-bound, 2-8 workers 7-12x
+  worse), commit 5348f7b (route: delegated writer). item_training.collate/take/batch_loss; surrogate masked_center,
+  masked_graph, masked_softmax; every arm batched; dispatcher default 1 worker; timing warm-up per worker, in-worker
+  seconds. TDD: RED 31 failed (tests/test_batched.py, oracle = frozen per-bag copies of the old models) -> GREEN 32
+  passed (forward, loss and gradients vs per-bag sum at 1e-5, padding invariance, train curve vs per-bag loop).
+  Full suite 240 passed, 3 skipped; test_poc_e0b.py 7 passed. Local CPU per fit (80 epochs extrapolated, 141
+  synthetic bags 32-88 inst, k=128, machine shared): see report; e.g. abmil8 57.6 -> 7.6 s, permuted 173 -> 65 s.
+  Job folders repinned to 5348f7b (commit after it), timing job workers [1,2], epochs 3. Push denied by the local
+  permission classifier: branch not pushed, so the pin is not yet reachable.
+
 ## Next step
-Operator: push feat/edaic-e1-v07, then preflight + submit --smoke e1v07-timing (launch order in tools/kaggle/e1v07/README.md).
+Push feat/edaic-e1-v07 (needs operator permission), then rehearse e1v07-timing on the T4 and re-read per-fit times.
