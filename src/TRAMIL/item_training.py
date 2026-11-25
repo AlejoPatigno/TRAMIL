@@ -24,6 +24,7 @@ __provenance__ = {
         "model_penalty_enters_the_training_loss",
         "optimizer_is_the_e1_protocol_adamw",
         "svm_accepts_the_class_derived_from_item_sums",
+        "label_permutation_moves_the_eight_item_scores_as_a_unit",
     ],
 }
 
@@ -40,6 +41,13 @@ def omega_plus(y):
     """omega_+ = M_0 / M_1 of the given (training) set."""
     y = np.asarray(y)
     return float((y == 0).sum() / (y == 1).sum())
+
+
+def permute_items(S, seed):
+    """Label permutation across subjects (v07 Ec. 91 nulls): the eight item scores of a subject move as one row, so the
+    total, the class and omega_+ are the donor's (recompute y with binary)."""
+    S = np.asarray(S)
+    return S[np.random.default_rng(seed).permutation(len(S))]
 
 
 def weighted_item_mse(s_hat, s, y, ow):
