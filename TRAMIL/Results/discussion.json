@@ -1,159 +1,135 @@
 {
   "schema": 1,
   "stage": "poc",
-  "protocol": "experiments/experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v04.md",
-  "generated_at": "2026-11-19T04:33:10Z",
-  "summary": "Proof of concept of the residual semantic-prior bipartite MIL on E-DAIC. The pipeline runs end to end: the frozen eGeMAPS + mpnet feature cache was extracted on Kaggle for all 184 sessions, and E1 ran at its declared scale (3 repetitions x 5 folds x 3 seeds, up to 80 epochs) for the residual model, the learned-only control, ABMIL, Gated ABMIL and the SVM floor; Symptom-Guided was deferred. Every arm sits at chance (mean AUROC 0.451-0.474) and no paired difference is detectable; an SVM permutation null on the same partitions (mean 0.501, 5-95% 0.399-0.601) contains the observed 0.451. The 48-bag pilot (0.58-0.76) was small-sample noise. Only H1 was exercised, and it is inconclusive.",
+  "protocol": "experiments/experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v05.md",
+  "generated_at": "2026-11-25T04:54:38Z",
+  "summary": "Proof of concept E0 (proposal r22, H8) on synthetic bags, run on Kaggle CPU at the declared scale (gate 0: 6 configurations x 5 seeds; arms: 10 seeds x 3 trained arms x 2 strengths, up to 400 epochs). It replaces the r12 proof of concept (E1 on E-DAIC, all arms at chance), whose record stays in Results/E1_full.md and git history. Gate 0 passed (1.2199 vs constant 1.2642). P1, P2 and P4 are supported under the pre-registered rules, so H8 is carried forward, but the margins are thin: P1 and P2a both sit at Holm-adjusted p 0.0488, the bootstrap interval of the P2a mean difference crosses zero, and the per-item Spearman between the surrogate and the prompt prior is near zero for every arm, so the surrogate-error gain reads as shrinkage toward the prior rather than recovery of it. P3: removing text at inference costs 0.116 SS^w [0.071, 0.163]; the full model keeps about 17% of the r12 reference skill.",
   "discussion_type": [
+    "ablation",
     "comparative",
     "failure-analysis"
   ],
   "metrics": [
     {
-      "name": "AUROC of the seed ensemble per outer fold",
+      "name": "SS^w (Ec. 93) on test bags",
       "role": "primary",
-      "why": "The protocol's primary metric for E1 (subject-level binary PHQ-8 >= 10)."
+      "why": "Primary endpoint of H5 and the score H8 reads against the untargeted arm."
+    },
+    {
+      "name": "Surrogate error ||Rhat_c - Rc||_F^2 / (8 N_b) on test bags",
+      "role": "secondary",
+      "why": "The quantity the Ec. 77 penalty minimizes; separates a better profile from a better surrogate."
+    },
+    {
+      "name": "Subject-level AUROC of the summed item profile",
+      "role": "secondary",
+      "why": "H1 is stated on it."
     }
   ],
   "hypotheses": [
     {
-      "id": "H1",
-      "experiment": "E1",
-      "statement": "with the same text access, the AUROC of the residual model is equivalent within 0.05 to Symptom-Guided cross-attention and to the text-aware learned-attention control.",
-      "metric": "AUROC (seed ensemble per outer fold)",
-      "test": "Two one-sided tests on Ec. 69 over 15 outer partitions, corrected resampled t (Ec. 63)",
-      "criterion": "H1 comparability is supported when, for both primary comparators, the Holm-adjusted 90% interval of Ec. 69 lies inside (-0.05, 0.05); it is refuted when either interval lies entirely below -0.05; any other outcome is reported as inconclusive. The posterior probability of the region [-0.05, 0.05] is reported for both comparators. The development DeLong interval is descriptive and does not enter the decision.",
-      "observed": "Residual 0.474, learned-only 0.455, ABMIL 0.462, Gated ABMIL 0.456, SVM 0.451 (mean over 15 folds). Residual minus learned-only: mean 0.019, 90% interval [-0.057, 0.095], p 0.665. Symptom-Guided not run.",
+      "id": "E0-P1",
+      "experiment": "E0",
+      "statement": "The full model has a class-weighted skill score above zero at rho = 0.5.",
+      "metric": "SS^w",
+      "test": "One-sample Wilcoxon (greater), seed as unit, n = 10, Holm over P1, P2a, P2b",
+      "criterion": "Holm-adjusted p < 0.05.",
+      "observed": "Mean 0.0244 (sd 0.0316); W = 45, raw p 0.0420, adjusted p 0.0488; rank-biserial 0.636; bootstrap CI [0.0038, 0.0401].",
       "evidence": [
-        "Results/E1_full.md",
-        "Results/E1_pilot.md"
+        "Results/poc_e0.md",
+        "Results/poc_e0.json"
       ],
-      "verdict": "inconclusive",
-      "rationale": "The criterion needs both primary comparators; Symptom-Guided was not run, and the learned-only interval crosses -0.05, so neither supported nor refuted. All arms are at chance, so equivalence here would only mean all methods fail alike; the interval was not Holm-adjusted."
+      "verdict": "supported",
+      "rationale": "Adjusted p is below alpha, by 0.0012; one of ten seeds is negative (-0.055). Supported under the rule, with a thin margin."
     },
     {
-      "id": "H2",
-      "experiment": "E2",
-      "statement": "the residual model has a higher AUROC than its prior-only ablation ($D_b = 0$) and its residual-only ablation ($\\lambda = 0$); a learned global intensity is compared with a fixed one and with per-node intensities (Ec. 57).",
-      "metric": "",
-      "test": "",
-      "criterion": "a Friedman test over the five variants on the 15 replicates rejects equal ranks at alpha 0.05, and the Holm-corrected Ec. 63 difference between the residual model and each of the two primary ablations (prior only, residual only) is above zero; the comparisons of learned versus fixed and global versus per-node intensity are exploratory, with Benjamini-Hochberg adjustment and effect sizes d_z.",
-      "observed": "E2 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E2 yet; it is out of the proof-of-concept scope."
+      "id": "E0-P2",
+      "experiment": "E0",
+      "statement": "The full model has a higher SS^w and a lower surrogate error than the untargeted arm at rho = 0.5.",
+      "metric": "SS^w; surrogate error",
+      "test": "Two paired Wilcoxon tests (P2a greater, P2b less), seed as unit, Holm over P1, P2a, P2b",
+      "criterion": "Supported when both adjusted p < 0.05; partially supported when one passes.",
+      "observed": "P2a: diff +0.0084, W = 47, adjusted p 0.0488, rank-biserial 0.709, CI [-0.0013, 0.0202]. P2b: diff -0.0087 (0.0015 vs 0.0102), W = 55, adjusted p 0.0029, rank-biserial 1.0, CI [-0.0118, -0.0059].",
+      "evidence": [
+        "Results/poc_e0.md",
+        "Results/poc_e0.json"
+      ],
+      "verdict": "supported",
+      "rationale": "Both tests pass after Holm. P2a is fragile: its adjusted p equals P1's at 0.0488 and the bootstrap interval of the mean difference includes zero. P2b is clear, but the near-zero per-item Spearman of every arm suggests the lower error comes from shrinking Rhat_c toward the low-variance Rc rather than from recovering the item identity."
     },
     {
-      "id": "H3",
-      "experiment": "E3",
-      "statement": "the ordering of methods in E1 is preserved when eGeMAPSv02 is replaced by a pooled self-supervised encoder and by an emotion-aware encoder.",
-      "metric": "",
-      "test": "",
-      "criterion": "for each extractor, the equivalence reading of E1 (Ec. 69, margin 0.05) is repeated for both primary contrasts and its decision is reported; the ordering is summarized by a Friedman test over the three methods on the 15 replicates and by Kendall's W, and the extractor is counted as preserving the E1 ordering only when its Friedman mean ranks keep the E1 order.",
-      "observed": "E3 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E3 yet; it is out of the proof-of-concept scope."
-    },
-    {
-      "id": "H4",
-      "experiment": "E4",
-      "statement": "at the 141 training subjects, the residual model has a lower variance across seeds and partitions than Symptom-Guided, in AUROC and in attention-map stability, with AUROC equivalent within 0.05 (E1).",
-      "metric": "",
-      "test": "",
-      "criterion": "H2 is supported when the 95% percentile interval of the fold-block bootstrap log variance ratio lies above zero for AUROC and for attention-map stability, with Holm correction over the two, and the AUROC equivalence of E1 holds for Symptom-Guided.",
-      "observed": "E4 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E4 yet; it is out of the proof-of-concept scope."
-    },
-    {
-      "id": "H5",
-      "experiment": "E5",
-      "statement": "using all instances does not lower AUROC relative to TCAMIL top-k selection, the effective number of attended instances (Ec. 52) exceeds k, and training time grows with bag size at a rate estimated with its interval.",
-      "metric": "",
-      "test": "",
-      "criterion": "for every k, the lower bound of the Holm-adjusted 90% interval of the all-instance minus top-k difference (Ec. 69) lies above -0.05, which is non-inferiority at the equivalence margin; the median effective number of attended instances is above k; the slope of training time per epoch on bag size is reported with its 95% interval, and the cost claim holds when the interval of a quadratic term contains zero.",
-      "observed": "E5 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E5 yet; it is out of the proof-of-concept scope."
-    },
-    {
-      "id": "H6",
-      "experiment": "E6",
-      "statement": "with a permuted prior the AUROC falls to the residual-only level; prompt-based proximities give an AUROC at least as high as response-based ones but a lower LiftSem and a lower effective attention, and their advantage vanishes when the answers to the mental-health-history prompts are removed.",
-      "metric": "",
-      "test": "",
-      "criterion": "averaged over 5 permuted-prior draws, the permuted-prior AUROC is equivalent within 0.05 to the residual-only AUROC by the two one-sided tests of Ec. 69, with permutation p values computed as (b + 1) / (m + 1); H4 is refuted if prompt-based proximities raise both AUROC and LiftSem without lowering the effective attention, and the prompt versus prompt-with-history-removed contrast is read as a paired difference on the same runs, with Holm correction over the three contrasts.",
-      "observed": "E6 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E6 yet; it is out of the proof-of-concept scope."
-    },
-    {
-      "id": "H7",
-      "experiment": "E7",
-      "statement": "each node contribution (Ec. 61) correlates with its PHQ-8 item score above the permuted-prior null.",
-      "metric": "",
-      "test": "",
-      "criterion": "at least one item has a Spearman correlation whose permutation p value, Holm-corrected over the eight items, is below 0.05, and whose paired subject-level bootstrap interval of the difference to the permuted-prior correlation lies above zero; the count of such items is reported.",
-      "observed": "E7 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E7 yet; it is out of the proof-of-concept scope."
-    },
-    {
-      "id": "H8",
-      "experiment": "E8",
-      "statement": "LiftSem with the zero-shot NLI relevance matrix is positive against the within-bag permutation null (Ec. 60), and larger for the residual model than for the comparators and the permuted-prior model.",
-      "metric": "",
-      "test": "",
-      "criterion": "the unit is the subject (184 Wizard-of-Oz subjects); the residual LiftSem is above the within-bag permutation null with a permutation p value below 0.05, and its subject-paired difference to each comparator, tested with the paired Wilcoxon signed-rank test, is above zero after Holm correction over the three contrasts, with the rank-biserial correlation as effect size; the rank correlation between S_b and R_b (Ec. 67) is reported as a pre-registered check.",
-      "observed": "E8 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E8 yet; it is out of the proof-of-concept scope."
-    },
-    {
-      "id": "H9",
-      "experiment": "E9",
-      "statement": "trained on the Wizard-of-Oz training subjects only, the residual model is read once on the official test split of 56 agent-led sessions; the reading is descriptive (proposal r06, H7), and on MODMA the ordering of methods is described.",
-      "metric": "",
-      "test": "",
-      "criterion": "none; E9 is descriptive. The intervals are reported whatever their direction, and with 21 positive sessions equivalence within 0.05 is not claimed. On MODMA the ordering of the three primary methods is reported without significance language.",
-      "observed": "E9 was not run in the proof of concept.",
-      "evidence": [],
-      "verdict": "inconclusive",
-      "rationale": "No measurement exists for E9 yet; it is out of the proof-of-concept scope."
+      "id": "E0-P4",
+      "experiment": "E0",
+      "statement": "At rho = 0 the paired SS^w difference between the full and the untargeted arms has a bootstrap interval containing zero.",
+      "metric": "SS^w",
+      "test": "Percentile bootstrap (B = 10000) of the seed-mean paired difference",
+      "criterion": "Supported when the interval contains zero.",
+      "observed": "Diff -0.0045, CI [-0.0219, 0.0119].",
+      "evidence": [
+        "Results/poc_e0.md",
+        "Results/poc_e0.json"
+      ],
+      "verdict": "supported",
+      "rationale": "The interval contains zero; the penalty adds no SS^w when the audio carries no prompt information. Absence of evidence with n = 10, not evidence of equivalence."
     }
   ],
   "novelty": {
-    "claim": "Correcting a permanent semantic prior with a learned residual gives MIL attention over interview answers that is as accurate as text-aware attention and more stable across seeds.",
-    "verdict": "not_justified",
+    "claim": "Distilling the interviewer-prompt prior into acoustics, with text as training-only privileged information (pillar C3, r22), improves the item profile over the same model without the penalty and does nothing when the audio does not carry the prior.",
+    "verdict": "partially_justified",
     "evidence": [
-      "Results/E1_full.md",
-      "Results/E1_pilot.md"
+      "Results/poc_e0.md",
+      "Results/poc_e0.json"
     ],
-    "rationale": "At full E1 scale no arm, the residual model included, separates depressed from non-depressed subjects above chance, so the proof of concept cannot show any benefit of the residual correction. Stability (H4) and the Symptom-Guided comparison were not measured."
+    "rationale": "The pre-registered ablation (full vs untargeted) and the negative control pass, so the existence proof holds on synthetic bags. But the SS^w gain is small (0.008) with an interval crossing zero, and the per-item Spearman shows no recovery of the prior even at rho = 0.5, so the mechanism the claim names is not demonstrated. The cost of removing text (P3) is large."
   },
   "qualitative": [],
-  "qualitative_not_applicable": "No attention or interpretability reading is meaningful while every arm is at chance; the attention-map analyses belong to E4, E7 and E8, which were not run.",
+  "qualitative_not_applicable": "The pre-registered per-item fidelity heatmap was not rendered as a figure; its numbers are in poc_e0.json (arms.*.spearman). Seed-mean per-item Spearman of Rhat_c vs Rc: full rho 0.5 0.0014 (sd 0.0115), untargeted rho 0.5 -0.0074, full rho 0 0.0033, untargeted rho 0 -0.0014; max |rho_s| 0.098. The full model is marginally above the untargeted arm at rho 0.5, but no arm shows structure, which fails the qualitative expectation that the full model recovers the prior.",
   "limitations": [
-    "Symptom-Guided, a primary H1 comparator, was not implemented.",
-    "Deviations accepted by the operator: cleaned instead of raw audio, session gain -26 dBFS, silence threshold 35 dB, pre-cut wavs for 318/321/341/362.",
-    "Comparisons pool 15 partitions through the corrected resampled t without Holm adjustment; this statistical reading is still to be confirmed.",
-    "Small sample: 141 training subjects, 44 positive; outer test folds of 28-29 subjects."
+    "Synthetic bags only; nothing here transfers to E-DAIC.",
+    "Generator variant deviates from experiments v05 (identity enters audio only through rho * p[z], shared severity direction, no prompt/audio disagreement); to be recorded in experiments v06.",
+    "Weak signal by construction: logistic decodability of z is about 0.23 at rho 0.5 (chance 0.125), and the prompt prior Rc has very low variance (0.03 one-hot plus noise), which makes surrogate error a weak proxy for recovery.",
+    "P1 and P2a pass with adjusted p 0.0488 over 10 seeds; a rerun with other seeds could flip them.",
+    "Convergence curves, fidelity heatmap and interval plots were not rendered as figures."
   ],
   "next_steps": [
-    "Implement Symptom-Guided and rerun E1 to complete the H1 comparison.",
-    "Diagnose whether the acoustic and text features carry any subject-level signal (e.g. per-feature or text-only baselines) before scaling further.",
-    "Confirm the statistical reading of the pooled comparisons."
+    "Record the generator deviation and the E0 outcome in experiments v06 and align E1-E9 with r22.",
+    "Before E-DAIC, check why the surrogate does not recover the prior (Spearman near zero): verify the Spearman computation, and consider a rho or Rc-variance sweep.",
+    "Render the pre-registered figures from poc_e0.json (curves, per-item heatmap, paired-difference intervals)."
   ],
   "available_evidence": {
     "figures": [],
-    "tables": [],
+    "tables": [
+      "Results/poc_e0.md"
+    ],
     "qualitative": [],
-    "significance": []
+    "significance": [
+      "Results/poc_e0.json"
+    ]
+  },
+  "contribution_type": {
+    "type": "Concept & Feasibility",
+    "why": "E0-P1, E0-P2 and E0-P4 are supported only on synthetic bags, with E0-P1 and E0-P2a at adjusted p 0.0488 and novelty partially_justified: the training-only distillation idea is shown feasible at pilot scale, while the mechanism (prior recovery, per-item Spearman near zero) and any real-data benefit remain unshown.",
+    "affinity": {
+      "General": {
+        "score": 30,
+        "why": "A general ML contribution would need the gain on real data; E0 is synthetic and the SS^w gain is 0.008 with an interval crossing zero."
+      },
+      "Theory": {
+        "score": 10,
+        "why": "No theorem or formal guarantee is proved; E0 is an empirical existence check."
+      },
+      "Use-Inspired": {
+        "score": 35,
+        "why": "Motivated by depression screening from interviews, but no E-DAIC result supports the use case yet."
+      },
+      "Concept & Feasibility": {
+        "score": 80,
+        "why": "A pilot-scale synthetic proof that the penalty-trained surrogate helps when audio carries the prior and not otherwise (E0-P1, E0-P2, E0-P4)."
+      },
+      "Negative Results": {
+        "score": 25,
+        "why": "The prior r12 E1 was at chance and E0 shows no prior recovery, but the central E0 verdicts are supported, so the findings are not primarily negative."
+      }
+    }
   }
 }

@@ -14,7 +14,12 @@ Constraints: Gate 0 re-run on the new generator (T7 result does not carry over);
 - [x] T1 generator + model (Ec. 114-116, 72 with G^, 18, 77) + SS^w (Ec. 93) with tests -- route: delegated writer (2 non-trivial files)
 - [x] T2 runner: gate 0, arms x rho x seeds, stats (Wilcoxon one-sided, Holm, rank-biserial, bootstrap), report, resumable per-run cache, smoke mode, timing probe -- route: same writer
 - [x] T3 Kaggle job generate + preflight + rehearsal (operator authorizes launch)
-- [ ] T4 Kaggle run, fetch, report, discussion.json
+- [x] T4 Kaggle run, fetch, report, discussion.json
+  - Evidence: Kaggle CPU run alejopatio/papersmith-poc-e0 complete, fetch verdict current (fresh).
+    Gate 0 PASS; P1, P2, P4 supported (P1 and P2a at Holm p 0.0488; P2a CI crosses 0); P3 = -0.116 [-0.163, -0.071].
+    Per-item surrogate Spearman near zero for every arm (no prior recovery). discussion_cli check: complete.
+    contribution_type from the paper-reviewer findings stretch, run inline (agent not registered in this session).
+  - Pending: G-EXP-POC is the operator's approval (`smith novelty approve --gate poc`).
 
 ## Evidence
 - T1+T2 commit fe28b8e (`src/TRAMIL/poc_e0.py`, `tests/test_poc_e0.py`). Route: delegated writer. TDD strict, runner `.venv/Scripts/python -m pytest`.
