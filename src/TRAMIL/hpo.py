@@ -118,14 +118,10 @@ def _commit():
         return None
 
 
-def run_fold(items, rep, fold, out_dir, Q=None, arms=tuple(e1_arms.ARMS), K=K_GRID, P=P_GRID,
-             max_epochs=item_training.MAX_EPOCHS, kstar_arms=KSTAR_ARMS):
-    """Sequential search of one outer training set; writes and returns the frozen values."""
-    res = [run_unit(s, items, Q) for s in units(rep, fold, arms, K, P, max_epochs)]
-    out = reduce(res, kstar_arms)
-    js = {"rep": rep, "fold": fold, **out,
-          "grid": {"K": list(K), "P": list(P), "k_ref": K_REF, "k_prompt": K_PROMPT, "arms": list(arms),
-                   "kstar_arms": list(kstar_arms), "max_epochs": max_epochs, "inner_folds": INNER_FOLDS},
+def freeze(results, rep, fold, out_dir, grid, kstar_arms=KSTAR_ARMS):
+    """Reduce one outer training set's unit results and write hpo_r{rep}_f{fold}.json (atomic)."""
+    out = reduce(results, kstar_arms)
+    js = {"rep": rep, "fold": fold, **out, "grid": {**grid, "kstar_arms": list(kstar_arms)},
           "provenance": {"seed": SEED, "commit": _commit() or os.environ.get("FORGE_CLONE_COMMIT"),
                          "outer_seed": validation.SEEDS_OUTER[rep], "inner_seed": validation.INNER_SEED + fold}}
     out_dir = Path(out_dir)
@@ -134,6 +130,15 @@ def run_fold(items, rep, fold, out_dir, Q=None, arms=tuple(e1_arms.ARMS), K=K_GR
     tmp.write_text(json.dumps(js, indent=2))
     os.replace(tmp, out_dir / f"hpo_r{rep}_f{fold}.json")
     return out
+
+
+def run_fold(items, rep, fold, out_dir, Q=None, arms=tuple(e1_arms.ARMS), K=K_GRID, P=P_GRID,
+             max_epochs=item_training.MAX_EPOCHS, kstar_arms=KSTAR_ARMS):
+    """Sequential search of one outer training set; writes and returns the frozen values."""
+    res = [run_unit(s, items, Q) for s in units(rep, fold, arms, K, P, max_epochs)]
+    grid = {"K": list(K), "P": list(P), "k_ref": K_REF, "k_prompt": K_PROMPT, "arms": list(arms),
+            "max_epochs": max_epochs, "inner_folds": INNER_FOLDS}
+    return freeze(res, rep, fold, out_dir, grid, kstar_arms)
 
 
 def load_frozen(out_dir, rep, fold):
