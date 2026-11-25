@@ -33,7 +33,7 @@ NOTE = (
 
 
 def load_items(labels_path, edaic_dir, cache_dir, n_bags=None, seed=0, acoustic="egemaps", text_dir=None):
-    """Training-split bags with their features: (X raw, R proximity, y) per subject, plus the exclusions.
+    """Training-split bags with their features: (X raw, R proximity, y, s item scores) per subject, plus the exclusions.
     X is the 88-d eGeMAPS block (default) or the 768-d WavLM layer-6 vector (acoustic="wavlm")."""
     import pandas as pd
 
@@ -47,7 +47,8 @@ def load_items(labels_path, edaic_dir, cache_dir, n_bags=None, seed=0, acoustic=
         X, E = features.bag_features(b, cache_dir, acoustic=acoustic, text_dir=text_dir)
         dropped += len(b) - len(X)
         if len(X):
-            items.append({"subject": b.subject, "X": X, "R": proximity.proximity(E, Q), "y": b.y})
+            items.append({"subject": b.subject, "X": X, "R": proximity.proximity(E, Q), "y": b.y,
+                          "s": np.asarray(b.s, np.float32)})
     return items, {"bags_requested": len(chosen), "bags_used": len(items), "instances_dropped_nonfinite": dropped}
 
 

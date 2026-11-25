@@ -16,7 +16,9 @@ __provenance__ = {
         "recomputed_label_disagrees_with_flag_in_20_sessions",
         "e1_training_bags_are_141_subjects",
         "stratified_subset_keeps_class_ratio_is_reproducible_and_sorted",
+        "bag_carries_the_eight_item_scores_in_item_order",
     ],
+    "r22": {"equations": [75, 76, 77], "note": "s_b in {0..3}^8 is the item target of r22 Ec. 77; y_b = 1[sum s_b >= 10]"},
 }
 
 MIN_ANSWER_S = 0.25  # Section 3: responses shorter than 0.25 s are excluded
@@ -25,7 +27,8 @@ THRESHOLD = 10  # PHQ-8 total >= 10
 
 @dataclass(frozen=True)
 class Bag:
-    """B_b = {(a_bi, t_bi)}: audio files and texts of one subject, y_b in {0, 1} (Ec. 1, 2)."""
+    """B_b = {(a_bi, t_bi)}: audio files and texts of one subject, y_b in {0, 1} (Ec. 1, 2); s = the eight PHQ-8 item
+    scores PHQ8_1..PHQ8_8 (r22 Ec. 77), so y = 1[sum(s) >= 10]."""
 
     subject: int
     y: int
@@ -33,6 +36,7 @@ class Bag:
     texts: list
     wavs: list
     idx: list
+    s: tuple = ()
 
     def __len__(self):
         return len(self.texts)
@@ -40,11 +44,14 @@ class Bag:
 
 def load_labels_frame(df):
     """Recompute the binary label from the eight item scores; keep the distributed flag as a sensitivity column."""
-    items = [c for c in df.columns if c.startswith("PHQ8_")]
+    items = [c for c in df.columns if c.startswith("PHQ8_")]  # file order = PHQ-8 item order (columns 0..7)
+    if len(items) != 8:
+        raise ValueError(f"expected the eight PHQ8_ item columns, found {items}")
     out = df[["Participant", "split"]].copy()
     out["phq8_total"] = df[items].sum(axis=1)
     out["label"] = (out["phq8_total"] >= THRESHOLD).astype(int)
     out["label_distributed"] = df["Depression_label"].astype(int)
+    out["items"] = [tuple(int(v) for v in row) for row in df[items].to_numpy()]
     return out
 
 
@@ -72,6 +79,7 @@ def build_bags(instances, audio_dir, labels, split="train"):
                 texts=[str(t) if isinstance(t, str) else "" for t in g["a_text"]],
                 wavs=[audio_dir / str(sid) / f"{sid}_{i:03d}_a.wav" for i in idx],
                 idx=idx,
+                s=tuple(lab.loc[sid, "items"]) if "items" in lab.columns else (),
             )
         )
     return out

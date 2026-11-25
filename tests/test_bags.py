@@ -79,3 +79,12 @@ def test_stratified_subset_keeps_class_ratio_is_reproducible_and_sorted():
     assert sum(b.y for b in s1) == 6  # 30% of 20
     assert [b.subject for b in s1] == sorted(b.subject for b in s1)
     assert [b.subject for b in s1] != [b.subject for b in bags.stratified_subset(allb, 20, seed=1)]
+
+
+def test_bag_carries_the_eight_item_scores_in_item_order():
+    df = _frame([[7, 0, 1, 2, 3, 0, 1, 2, 3, 0, "train"]])
+    lab = bags.load_labels_frame(df)
+    assert lab.loc[0, "items"] == (0, 1, 2, 3, 0, 1, 2, 3)
+    inst = pd.DataFrame({"id": [7], "idx": [0], "a_text": ["a"], "a_dur": [1.0]})
+    (b,) = bags.build_bags(inst, Path("audio"), lab, split="train")
+    assert b.s == (0, 1, 2, 3, 0, 1, 2, 3) and b.y == int(sum(b.s) >= 10)

@@ -138,3 +138,12 @@ def test_mounted_datasets_are_found_through_the_forge_map(tmp_path, monkeypatch)
         e1_run.FEATURES_REF: str(root / "ds" / "features"), e1_run.INSTANCES_REF: str(root / "ds" / "instances")}))
     found = e1_run._find(e1_run._default_roots())
     assert found["features"].name == "features" and found["labels"].name == "detailed_lables.csv"
+
+
+def test_load_items_carries_item_scores_whose_sum_gives_the_class(tmp_path):
+    root = _make_input(tmp_path / "in")
+    found = e1_run._find([root])
+    items, _ = exp_e1.load_items(found["labels"], found["instances"].parent, found["features"])
+    for it in items:
+        assert it["s"].shape == (8,) and it["s"].dtype == np.float32
+        assert it["y"] == int(it["s"].sum() >= 10)
