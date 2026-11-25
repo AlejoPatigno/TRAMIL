@@ -41,10 +41,10 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
 - [x] T3 Shared HPO (Ec. 102) frozen per outer fold to JSON. Route: delegated.
 - [x] T4 Statistics: pooled OOF AUROC (Ec. 82/83), vectorized shared bootstrap B=9999 (Ec. 85), NI (Ec. 86),
       DeLong (Ec. 84), Ec. 91 rule, Ec. 100/87; SS^omega (Ec. 93). Route: delegated.
-- [ ] T5 Permutation runner (Ec. 91) with reduced protocol, unit (perm, fold, arm). Route: delegated.
-- [ ] T6 GPU throughput: tensors on device, N worker processes per GPU over independent units, cuda.synchronize.
+- [x] T5 Permutation runner (Ec. 91) with reduced protocol, unit (perm, fold, arm). Route: delegated.
+- [x] T6 GPU throughput: tensors on device, N worker processes per GPU over independent units, cuda.synchronize.
       Route: delegated.
-- [ ] T7 Timing probe: per-fit and concurrent throughput (1,2,4,8 workers) for every arm -> Results/timing.json.
+- [x] T7 Timing probe (local CPU smoke only; GPU run pending): per-fit and concurrent throughput (1,2,4,8 workers) for every arm -> Results/timing.json.
       Route: delegated; GPU measurement runs on Kaggle after operator go.
 - [ ] T8 Kaggle jobs e1-v07-{search,real,perm} with the WavLM dataset, smoke unit, merge/report scripts.
       Route: inline (remote-execution).
@@ -78,5 +78,16 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
   example Var=0.625), Ec. 91 rule + p=(b+1)/24, Ec. 100, Ec. 87, SS^omega + bootstrap (cross-checked with poc_e0.ss_w).
   TDD: RED collection error (13 tests) -> GREEN 13 passed. Full suite 197 passed, 3 skipped; test_poc_e0b.py green.
 
+- E1 runner + T5 + T6 + T7 done, commit 2f48065 (route: delegated writer, writer trigger). e1v07_run.py: phases
+  search/real/perm/report, each unit through a pure run_unit -> <out>/<phase>/<uid>.json, resume = skip existing,
+  shard "i/n" or --units; search freezes hpo_r{rep}_f{fold}.json via new hpo.freeze; real = (rep, fold, arm, seed
+  11/23/37) + full_k768 + bag SVM, inner epoch selection then refit; perm (T5) = R_pi=23, donor seed 2026+r, rep-0
+  partition of the true labels, seed 11, frozen k*/p*, SVM kernel/C frozen from the real run; report = pooled stats,
+  Ec. 91 table, NI/DeLong/Ec. 87, descriptive + Holm table, SS^omega -> E1_v07.json/.md. dispatch.py (T6): spawn
+  pool, per-worker device-resident fold cache, default N from timing.json best fits/s. timing_v07.py (T7): per-fit
+  seconds (epochs measured, linear extrapolation to the budget, flagged) and N in {1,2,4,8} rows appended to
+  Results/timing.json (schema 2). TDD: RED 2 collection errors (9 tests) -> GREEN 9 passed (e2e synthetic ~40 s).
+  Full suite 206 passed, 3 skipped; test_poc_e0b.py 7 passed. Local real timing probe not run (needs data/GPU).
+
 ## Next step
-T5 permutation runner (Ec. 91) reusing hpo.load_frozen, item_training.permute_items and pooled_stats.assay.
+T7 GPU measurement on Kaggle, then T8 Kaggle jobs e1-v07-{search,real,perm} (needs operator go).
