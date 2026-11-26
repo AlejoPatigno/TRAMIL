@@ -25,7 +25,7 @@ def _bags(n=8):
 def test_every_new_arm_is_registered_and_the_e1_set_is_unchanged():
     assert len(e1_arms.E1_ARMS) == 10 and set(e1_arms.E1_ARMS) <= set(e1_arms.ARMS)
     assert set(e1_arms.E2E5_ARMS) == {"graph_corr", "graph_prior", "binary_sup", "free_desc", "free_zero",
-                                      "permuted_quint", "full_nohist", "full_x", "permuted_x", "untargeted_x"}
+                                      "permuted_quint", "full_nohist"} | set(e1_arms.ALIAS)
     assert set(e1_arms.ARMS) == set(e1_arms.E1_ARMS) | set(e1_arms.E2E5_ARMS)
 
 

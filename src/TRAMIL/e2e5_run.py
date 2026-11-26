@@ -46,7 +46,7 @@ PHASES = ("search", "real", "report")
 DER_SEED = 2026  # quintile derangement of the fit (rep, fold, inner or outer, seed) uses SeedSequence([DER_SEED, ...])
 # full_nohist is opt-in: it needs the frozen history prompt list (history_prompts), which real data does not carry yet
 DEFAULTS = dict(reps=e1.REPS, seeds=e1.SEEDS, P=hpo.P_GRID, max_epochs=item_training.MAX_EPOCHS,
-                arms=tuple(a for a in e1_arms.E2E5_ARMS if a != "full_nohist"), B=pooled_stats.B, k_star=None, p_alias=None, history_prompts=None)
+                arms=(*(a for a in e1_arms.E2E5_ARMS if a != "full_nohist"), "svm_x"), B=pooled_stats.B, k_star=None, p_alias=None, history_prompts=None)
 OWN_SUBS = ("search", "hpo", "real")  # frozen models travel in the same zips (frontend/ and real/*.pt)
 IMPORT_E1 = {"search": ("hpo",), "real": ("hpo",), "report": ("real", "perm", "hpo")}
 IMPORT_OWN = {"search": ("search", "hpo"), "real": ("search", "hpo"), "report": ("real",)}
@@ -85,12 +85,16 @@ def units(phase, out, **cfg):
                 k = _kstar(out, rep, fold, c)
                 own = json.loads(own_path(out, rep, fold).read_text())["p_star"] if search_arms(c) else {}
                 for a in c["arms"]:
+                    if a == "svm_x":  # the E1 bag-level SVM again, to persist its pipeline (same inner grid search)
+                        specs.append({"phase": "real", "rep": rep, "fold": fold, "arm": a, "model": "svm", "seed": 0})
+                        continue
                     if a in e1_arms.ALIAS:
                         p = c["p_alias"] if c["p_alias"] is not None else \
                             hpo.load_frozen(out / "hpo", rep, fold)["p_star"][e1_arms.ALIAS[a]]
                     else:
                         p = own[a]
-                    specs += [{"phase": "real", "rep": rep, "fold": fold, "arm": a, "model": a, "k": int(k), "p": p,
+                    ka = hpo.K_PROMPT if e1_arms.SOURCE.get(a) == "R" else k
+                    specs += [{"phase": "real", "rep": rep, "fold": fold, "arm": a, "model": a, "k": int(ka), "p": p,
                                "seed": s, "max_epochs": int(c["max_epochs"])} for s in c["seeds"]]
     return specs
 
@@ -123,8 +127,9 @@ def _bags(spec, data, items, tr, ev, k, tag, rec):
             frontend.retarget_quint(tb, [items[i] for i in idx], donor)
     elif spec["arm"] == "full_nohist":
         salt = "nohist"
-    key = (spec.get("perm", -1), spec["rep"], spec["fold"], "outer" if tag == 9 else tag, k, "X", salt)
-    return (*e1._bags(data, key, items, tr, ev, k, "X", post), data["cache"][("fe",) + key])
+    src = e1_arms.SOURCE.get(spec["model"], "X")
+    key = (spec.get("perm", -1), spec["rep"], spec["fold"], "outer" if tag == 9 else tag, k, src, salt)
+    return (*e1._bags(data, key, items, tr, ev, k, src, post), data["cache"][("fe",) + key])
 
 
 def _extras(m, eb, items_test):
@@ -155,9 +160,12 @@ def run_unit(spec, data):
     """One unit; data = {"items", "Q", "cache"[, "history"]}. Returns the spec plus its result, extras and seconds."""
     e1._sync()
     t0 = time.perf_counter()
+    if spec["model"] == "svm":
+        return e1.run_unit(spec, data)  # svm_x: the E1 unit itself, under its own name
     items = _arm_items(spec, data)
+    src = e1_arms.SOURCE.get(spec["model"], "X")
     train, test = e1._split(spec, data)  # the outer partition comes from the labels, which every variant shares
-    k = min(spec["k"], items[0]["X"].shape[1])
+    k = min(spec["k"], items[0][src].shape[1])
     y = [it["y"] for it in items]
     out, rec = dict(spec), {}
 
@@ -178,9 +186,9 @@ def run_unit(spec, data):
         P = item_training.predict(m, eb)
         out.update(epoch=e, curves=[[float(v) for v in c] for c in curves],
                    oof={str(items[i]["subject"]): [float(v) for v in row] for i, row in zip(test, P)},
-                   extra=_extras(m, eb, [items[i] for i in test]),
+                   **({"extra": _extras(m, eb, [items[i] for i in test])} if hasattr(m, "_parts") else {}),
                    drift=[float(v) for v in m.query_drift().detach()] if getattr(m, "free", None) == "desc" else None)
-        name = frozen.fe_name(spec, k, "X")
+        name = frozen.fe_name(spec, k, src)
         out["_files"] = {".pt": frozen.pack_state(spec, m, vbar, k, e, [items[i] for i in test], name)}
         out["_frontend"] = (name, frozen.pack_frontend(fe))
         if rec:

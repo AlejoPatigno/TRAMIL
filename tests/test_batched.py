@@ -36,6 +36,7 @@ ORACLE = {
     "permuted_x": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=1 / v, permuted=True),
     "untargeted_x": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=0.0),
 }
+ORACLE.update({a: ORACLE[b] for a, b in e1_arms.ALIAS.items() if a not in ORACLE})  # an alias is the E1 arm itself
 ARMS = tuple(e1_arms.ARMS)  # every registered arm has a per-bag oracle above
 
 

@@ -55,6 +55,9 @@ in use (real/perm/report at ebf6647) are not regenerated.
    downstream experiment re-fits a trained model (state_dict, frozen front end, OOF attention and diagnostics, all inside
    the job's verified zip), with loaders so E6 and E7 run inference only.
 3. Run the full suite once before committing and report the counts.
+4. Option A chosen for the E1 arms without a persisted model (gap 1 of U4): add abmil8_x, gated_abmil8_x,
+   symptom_guided_x, r06_8_x, abmil_r8_x, prompt_only_x, r12_x to e2e5-real (same frozen E1 k* and p*; prompt_only_x at
+   k = 8) and svm_x (the E1 bag-level SVM again, same deterministic inner kernel/C search, pipeline persisted). Done (U4b).
 
 ## Acceptance evidence
 - Full suite with worktree src: 332 passed, 3 skipped (331 passed + the one fixed test, re-run alone: test_item_comparators +
@@ -99,6 +102,12 @@ Inputs E6 and E7 need that are STILL NOT persisted or not available:
   141 subjects exists (E1 trains per outer fold only). Either E7 ensembles the 45 fold models per arm (persisted, each
   with its own front end) or a refit-on-all job is needed: operator decision. Also absent: features and bags of the 56
   test sessions and 30 agent-led sessions, the prompt reconstruction, the Ec. 111 thresholds and the hand transcriptions.
+
+U4b status: the gap 1 above is CLOSED for e2e5-real once it runs: 7 arm aliases + svm_x. Extra units vs the first e2e5
+plan: 15 outer folds x (7 arms x 3 seeds + 1 svm) = 330 units (315 neural = 1260 fits, 15 svm). Local CPU per fit
+(80 epochs, 141 bags): abmil8 3.8 s, gated 4.3, symptom_guided 4.9, r06_8 4.0, abmil_r8 4.0, prompt_only 9.6, r12 7.8;
+about 58 min CPU per shard of two (GPU not measured for these arms; the batched path is expected to be no slower).
+Neural *_x units carry no attention extras unless the model is a surrogate (prompt_only_x, r12_x do).
 
 ## Open questions for the operator
 1. ACCEPTED by the operator (see decisions). E1 real units lack attention, fidelity and graph diagnostics, so full, permuted, untargeted must be re-run as `*_x` aliases (extra fits, E1 k* and p*).

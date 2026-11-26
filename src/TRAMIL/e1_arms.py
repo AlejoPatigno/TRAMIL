@@ -46,9 +46,12 @@ ARMS = {
     "permuted_x": lambda k, p, v, Q: SurrogateModel(k, p, mu_R=1 / v, permuted=True),
     "untargeted_x": lambda k, p, v, Q: SurrogateModel(k, p, mu_R=0.0),
 }
+# The other E1 arms re-run as *_x for the same reason (their E1 real units persist no model): E6 and E7 read frozen models.
+ARMS.update({a + "_x": ARMS[a] for a in ("r12", "prompt_only", "abmil8", "gated_abmil8", "abmil_r8", "r06_8", "symptom_guided")})
 E2E5_ARMS = tuple(a for a in ARMS if a not in E1_ARMS)
-ALIAS = {"full_x": "full", "permuted_x": "permuted", "untargeted_x": "untargeted"}  # E1 arm whose k*, p* they use
-SOURCE = {"prompt_only": "R"}
+ALIAS = {a + "_x": a for a in ("full", "permuted", "untargeted", "r12", "prompt_only", "abmil8", "gated_abmil8", "abmil_r8",
+                               "r06_8", "symptom_guided")}  # E1 arm whose k*, p* they use
+SOURCE = {"prompt_only": "R", "prompt_only_x": "R"}
 
 
 def build(arm, k, p_drop, vbar, Q=None):
