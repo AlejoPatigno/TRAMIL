@@ -44,8 +44,9 @@ __provenance__ = {
 NAME = "E2E5_v07"
 PHASES = ("search", "real", "report")
 DER_SEED = 2026  # quintile derangement of the fit (rep, fold, inner or outer, seed) uses SeedSequence([DER_SEED, ...])
+# full_nohist is opt-in: it needs the frozen history prompt list (history_prompts), which real data does not carry yet
 DEFAULTS = dict(reps=e1.REPS, seeds=e1.SEEDS, P=hpo.P_GRID, max_epochs=item_training.MAX_EPOCHS,
-                arms=tuple(e1_arms.E2E5_ARMS), B=pooled_stats.B, k_star=None, p_alias=None, history_prompts=None)
+                arms=tuple(a for a in e1_arms.E2E5_ARMS if a != "full_nohist"), B=pooled_stats.B, k_star=None, p_alias=None, history_prompts=None)
 OWN_SUBS = ("search", "hpo", "real")
 IMPORT_E1 = {"search": ("hpo",), "real": ("hpo",), "report": ("real", "perm", "hpo")}
 IMPORT_OWN = {"search": ("search", "hpo"), "real": ("search", "hpo"), "report": ("real",)}
