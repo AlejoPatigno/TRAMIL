@@ -43,7 +43,7 @@ in use (real/perm/report at ebf6647) are not regenerated.
 - [x] U3.3 statistics (BH, profile metrics, stability, variance ratio, F/BF, edge diagnostics)
 - [x] U3.4 e2e5 runner (commit 7a15507)
 - [x] U3.5 report E2 to E5 (commit e10a5f8)
-- [x] U3.6 job folders pinned to 7f541b6, pushed
+- [x] U3.6 job folders pinned to 289d68d, pushed
 - [x] U3.7 CPU timing estimate per new arm
 - [x] U4 Persist frozen models: a real unit stores its state_dict and the fitted front end (zip members real/<uid>.pt,
   frontend/<name>.pt, SVM real/<uid>.pkl) and frozen.Store/load/predict read them back for inference only (E6, E7)
@@ -63,7 +63,7 @@ in use (real/perm/report at ebf6647) are not regenerated.
 - Batched-vs-per-bag equivalence and padding invariance: tests/test_batched.py parametrizes over every registered arm
   (graph_corr, graph_prior, binary_sup, free_desc, free_zero, permuted_quint, full_nohist, full_x, permuted_x,
   untargeted_x included); forward, loss, gradients at 1e-5 against frozen per-bag oracles (tests/oracle_e2e5.py); passed.
-- Offline validation: validate_run_config OK and staleness fresh for all 5 e2e5 folders, commit 7f541b6. Nothing submitted.
+- Offline validation: validate_run_config OK and staleness fresh for all 5 e2e5 folders, commit 289d68d. Nothing submitted.
 
 ## Local CPU timing per fit (80 epochs extrapolated from 3, 141 synthetic bags of 32-88 segments, 768-d, k=128, p=0.15,
 10 threads, shared machine, min of 3 interleaved passes; indicative only, GPU numbers come from the Kaggle probe)
