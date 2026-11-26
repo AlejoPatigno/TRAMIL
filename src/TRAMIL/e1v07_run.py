@@ -132,11 +132,15 @@ def permuted_items(items, r):
     return [dict(it, s=np.asarray(s, np.float32), y=int(s.sum() >= item_training.THRESHOLD)) for it, s in zip(items, S)]
 
 
-def _bags(data, key, items, tr, ev, k, source):
-    """Prepared fold bags collated once into padded tensors on the training device, cached per worker."""
+def _bags(data, key, items, tr, ev, k, source, post=None):
+    """Prepared fold bags collated once into padded tensors on the training device, cached per worker. post(train
+    bags, train indices) may change the prepared training bags before they are collated (E5 derangement target); the
+    key must then tell the variants apart."""
     cache = data.setdefault("cache", {})
     if key not in cache:
         tb, eb, info = frontend.fold_bags(items, tr, ev, k=k, source=source)
+        if post is not None:
+            post(tb, tr)
         dev = item_training.device()
         cache[key] = (item_training.collate(tb, dev), item_training.collate(eb, dev), info["vbar"])
     return cache[key]
@@ -476,9 +480,11 @@ def _extract(zpath, out, subs):
     return got
 
 
-def unpack_own_zips(out, name=NAME, subs=RESULT_DIRS):
-    """Resume: the zips this job wrote earlier in out give their units back as loose files (never overwriting)."""
-    return sum(len(_extract(z, Path(out), subs)) for z in sorted(Path(out).glob(f"{name}*.zip")))
+def unpack_own_zips(out, name=NAME, subs=RESULT_DIRS, phases=None):
+    """Resume: the zips this job wrote earlier in out (those of `phases`, default all) give their units back as loose
+    files (never overwriting)."""
+    pats = [f"{name}*.zip"] if phases is None else [f"{name}_{ph}*.zip" for ph in phases]
+    return sum(len(_extract(z, Path(out), subs)) for pat in pats for z in sorted(Path(out).glob(pat)))
 
 
 def import_upstream_files(roots, out, name=NAME, subs=RESULT_DIRS):
@@ -585,7 +591,7 @@ def run(phases, out_dir=None, input_root=None, shard=None, units=None, workers=1
     phases = [phases] if isinstance(phases, str) else list(phases)
     out = Path(out_dir) if out_dir else _default_out()
     out.mkdir(parents=True, exist_ok=True)
-    unpack_own_zips(out)
+    unpack_own_zips(out, phases=phases)
     got = import_upstream_files(_input_roots(input_root), out) if import_from_inputs else []
     imported = len(got)
     data, info = load_data(input_root, limit_bags)
