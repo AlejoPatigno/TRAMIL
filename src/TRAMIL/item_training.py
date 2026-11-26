@@ -34,6 +34,7 @@ __provenance__ = {
         "extra_padding_never_changes_outputs_or_gradients",
         "a_batch_is_an_index_slice_trimmed_to_its_longest_bag",
         "training_on_batches_matches_the_per_bag_loop_without_dropout",
+        "binary_head_models_train_and_validate_on_the_class_weighted_bce",
     ],
 }
 
@@ -150,10 +151,19 @@ def predict(m, bags):
                                for i in range(0, M, PREDICT_CHUNK)])
 
 
+def weighted_bce(logit, y, ow):
+    """Class-weighted binary cross-entropy of r06 (Ec. 38): positives weighted by omega_+, mean over the batch."""
+    pw = torch.tensor(ow, dtype=logit.dtype, device=logit.device)
+    return F.binary_cross_entropy_with_logits(logit, y.to(logit.dtype), pos_weight=pw)
+
+
 def val_mse(m, bags, ow):
-    """Ec. 39 inner-fold objective: class-weighted item MSE without the penalty."""
+    """Ec. 39 inner-fold objective: class-weighted item MSE without the penalty (a binary-head model: the class-weighted
+    BCE of r06, the same objective it trains on)."""
     T = _batched(bags, next(m.parameters()).device)
     P = torch.from_numpy(predict(m, T))
+    if getattr(m, "binary", False):
+        return float(weighted_bce(P[:, 0], T["y"].cpu().double(), ow))
     return float(weighted_item_mse(P, T["s"].cpu().double(), T["y"].cpu().tolist(), ow))
 
 
@@ -161,6 +171,8 @@ def batch_loss(m, b, ow):
     """Mean over the batch of omega_b (1/8) ||s_hat_b - s_b||^2 plus the model's own penalty (Ec. 77)."""
     terms = getattr(m, "fit_terms", None)
     s_hat, pen = terms(b) if terms else (m(b), 0.0)
+    if getattr(m, "binary", False):
+        return weighted_bce(s_hat[:, 0], b["y"], ow) + torch.as_tensor(pen, dtype=s_hat.dtype).mean()
     w = torch.where(b["y"] == 1, ow, 1.0).to(s_hat.dtype)
     return (w * (s_hat - b["s"]).pow(2).mean(-1)).mean() + torch.as_tensor(pen, dtype=s_hat.dtype).mean()
 

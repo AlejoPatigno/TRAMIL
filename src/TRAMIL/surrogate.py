@@ -7,6 +7,11 @@ Flags: permuted (Ec. 37 target, E2/E5 control), mu_R = 0 (untargeted, explorator
 E5: the input is the prompt rows and log N_b enters every item head), prior = "text" (r12 reference: reads R^c_b and
 G_b at inference, no surrogate map).
 
+E3/E4 variants (v07 E3, E4): graph = "corr" (Gamma = Delta, no prior term in Ec. 72), "prior" (Delta = 0, Gamma =
+(kappa / tau_e) G_hat, no W_a); free = "desc" / "zero" (Ec. 80, 81: the prior term and lambda are removed from Ec. 18,
+column j of W_o is the free query xi_j, started at s_0 P q_j or at 0); binary = r06 classification head (one linear
+logit over the flattened node matrix) trained on the binary label (item_training.batch_loss reads `binary`).
+
 Batched (T6b): every forward takes a padded batch (item_training.collate/take) with an instance mask; centering,
 graphs and softmaxes run over the valid rows of each bag only (masked_center, masked_graph, masked_softmax), so the
 outputs equal the per-bag model for any padding. A lone bag is run as a batch of one."""
@@ -34,6 +39,9 @@ __provenance__ = {
         "permuted_target_flag_trains_against_the_permuted_rows",
         "prompt_only_model_reads_prompt_rows_and_log_bag_size_in_every_head",
         "r12_reference_reads_the_prompt_prior_and_graph_at_inference",
+    "graph_variants_remove_exactly_one_term_of_the_edge_logits",
+    "free_query_variants_drop_lambda_and_start_w_o_at_the_descriptor_projection_or_zero",
+    "binary_head_has_the_r06_classifier_shape_and_returns_one_logit",
         "every_flag_trains_one_epoch_with_finite_predictions",
         "batched_forward_equals_the_per_bag_models",
         "batched_loss_and_gradients_equal_the_per_bag_sum",
@@ -105,20 +113,33 @@ def offdiag(n, like):
 
 
 class SurrogateModel(nn.Module):
-    def __init__(self, d_in, p_drop=0.0, mu_R=0.0, permuted=False, prior="surrogate", log_n=False):
+    def __init__(self, d_in, p_drop=0.0, mu_R=0.0, permuted=False, prior="surrogate", log_n=False, graph="full",
+                 free=None, Q=None, binary=False):
         super().__init__()
-        assert prior in ("surrogate", "text")
-        self.prior, self.mu_R, self.permuted = prior, float(mu_R), permuted
+        assert prior in ("surrogate", "text") and graph in ("full", "corr", "prior") and free in (None, "desc", "zero")
+        assert free is None or prior == "surrogate"
+        self.prior, self.mu_R, self.permuted, self.graph, self.free = prior, float(mu_R), permuted, graph, free
+        self.binary = binary
         self.enc = InputEncoder(d_in, p_drop)
         self.W_r = nn.Linear(H, J) if prior == "surrogate" else None
-        self.W_a = nn.Linear(H, H, bias=False)
+        self.W_a = nn.Linear(H, H, bias=False) if graph != "prior" else None
         self.W_g = nn.Linear(H, H, bias=False)
         self.W_v = nn.Linear(H, H)
         self.W_o = nn.Linear(H, J, bias=False)
         nn.init.zeros_(self.W_o.weight)  # W_o = 0 (Section 7.1)
-        self.rho = nn.Parameter(torch.tensor(math.log(math.e - 1.0)))  # lambda_0 = 1 (Ec. 17)
-        self.heads = ItemHeads()
+        if free == "desc":  # Ec. 81: xi_j(0) = s_0 P q_j, row j of the weight
+            from .item_comparators import project_queries
+
+            self.W_o.weight.data = project_queries(Q).clone()
+        if free is not None:
+            self.register_buffer("xi0", self.W_o.weight.detach().clone())
+        self.rho = None if free else nn.Parameter(torch.tensor(math.log(math.e - 1.0)))  # lambda_0 = 1 (Ec. 17)
+        self.heads = nn.Linear(J * H, 1) if binary else ItemHeads()  # r06 classifier on the flattened node matrix
         self.g = nn.Parameter(torch.zeros(J)) if log_n else None
+
+    def query_drift(self):
+        """cos(xi_j(T), xi_j(0)) per item (free-query variants; 0 for a zero start)."""
+        return nn.functional.cosine_similarity(self.W_o.weight, self.xi0, dim=1)
 
     def surrogate_rows(self, H_, mask):
         """R_hat = sigmoid(H W_r + b_r) (Ec. 114) and its per-bag centering over the valid rows (Ec. 115)."""
@@ -132,16 +153,22 @@ class SurrogateModel(nn.Module):
             P, E = Rc_hat, masked_graph(Rc_hat, m)  # Ec. 116 (the graph re-centers, a no-op here)
         else:
             Rc_hat, P, E = None, b["Rc"], b["G"]  # r12 reference: prompt prior and Ec. 70 graph at inference
-        Delta = masked_graph(self.W_a(H_), m) / TAU_A * offdiag(H_.shape[1], H_)  # Ec. 104, 71
-        Pi = masked_softmax(Delta + KAPPA / TAU_E * E, m[:, None, :], dim=2)  # Ec. 72, 73: rows over valid columns
+        if self.W_a is None:  # graph = "prior": Delta = 0 in Ec. 72
+            Delta = torch.zeros_like(E)
+        else:
+            Delta = masked_graph(self.W_a(H_), m) / TAU_A * offdiag(H_.shape[1], H_)  # Ec. 104, 71
+        Gamma = {"full": Delta + KAPPA / TAU_E * E, "corr": Delta, "prior": KAPPA / TAU_E * E}[self.graph]
+        Pi = masked_softmax(Gamma, m[:, None, :], dim=2)  # Ec. 72, 73: rows over valid columns
         Ht = H_ + torch.tanh(self.W_g(Pi @ H_))  # Ec. 74
         D = self.W_o(torch.tanh(self.W_v(Ht)))  # Ec. 15, 16
-        L = D + nn.functional.softplus(self.rho) / TAU * P  # Ec. 17, 18
+        L = D if self.rho is None else D + nn.functional.softplus(self.rho) / TAU * P  # Ec. 17, 18 (80: free queries)
         A = masked_softmax(L, m[:, :, None], dim=1)  # Ec. 20: per item over the valid segments
-        s_hat = self.heads(pool(A, Ht))  # Ec. 21, 75
+        Z = pool(A, Ht)  # Ec. 21
+        s_hat = self.heads(Z.flatten(1)) if self.binary else self.heads(Z)  # Ec. 75 or the r06 logit
         if self.g is not None:
             s_hat = s_hat + self.g * b["logN"][:, None]
-        return {"s_hat": s_hat, "H": H_, "Rc_hat": Rc_hat, "E": E, "Delta": Delta, "Pi": Pi, "A": A}
+        return {"s_hat": s_hat, "H": H_, "Rc_hat": Rc_hat, "E": E, "Delta": Delta, "Pi": Pi, "A": A, "D": D, "L": L,
+                "Ht": Ht}
 
     def parts(self, b):
         bb, single = batch_of(b)

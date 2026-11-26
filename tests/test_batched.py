@@ -5,11 +5,13 @@ import numpy as np
 import pytest
 import torch
 
+import oracle_e2e5 as O5
 import oracle_item_comparators as OC
 import oracle_surrogate as OS
 from TRAMIL import e1_arms, frontend, item_training as it
 from test_frontend import _items
 from test_item_comparators import _Q
+from TRAMIL.item_comparators import project_queries
 
 ORACLE = {
     "full": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=1 / v),
@@ -22,8 +24,20 @@ ORACLE = {
     "abmil_r8": lambda k, v, Q: OC.ABMIL8(k, 0.0, with_R=True),
     "r06_8": lambda k, v, Q: OC.R06Items(k, 0.0),
     "symptom_guided": lambda k, v, Q: OC.SymptomGuided(Q, k, 0.0),
+    # E2 to E5 arms (per-bag oracles of oracle_e2e5.py; aliases and data variants share the E1 oracle)
+    "graph_corr": lambda k, v, Q: O5.PerBagVariant(k, 0.0, mu_R=1 / v, graph="corr"),
+    "graph_prior": lambda k, v, Q: O5.PerBagVariant(k, 0.0, mu_R=1 / v, graph="prior"),
+    "free_desc": lambda k, v, Q: O5.PerBagVariant(k, 0.0, mu_R=1 / v, free="desc", xi0=project_queries(Q)),
+    "free_zero": lambda k, v, Q: O5.PerBagVariant(k, 0.0, mu_R=1 / v, free="zero"),
+    "binary_sup": lambda k, v, Q: O5.PerBagVariant(k, 0.0, mu_R=1 / v, binary=True),
+    "permuted_quint": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=1 / v, permuted=True),
+    "full_nohist": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=1 / v),
+    "full_x": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=1 / v),
+    "permuted_x": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=1 / v, permuted=True),
+    "untargeted_x": lambda k, v, Q: OS.SurrogateModel(k, 0.0, mu_R=0.0),
 }
-ARMS = tuple(e1_arms.ARMS)
+ORACLE.update({a: ORACLE[b] for a, b in e1_arms.ALIAS.items() if a not in ORACLE})  # an alias is the E1 arm itself
+ARMS = tuple(e1_arms.ARMS)  # every registered arm has a per-bag oracle above
 
 
 def _setup(arm, n=10, seed=0):
@@ -55,7 +69,7 @@ def test_batched_forward_equals_the_per_bag_models(arm):
     with torch.no_grad():
         got = new(T)
         want = torch.stack([old(b) for b in bags])
-    assert got.shape == (len(bags), 8) and torch.allclose(got, want, atol=1e-5, rtol=1e-5)
+    assert got.shape == (len(bags), 1 if arm == "binary_sup" else 8) and torch.allclose(got, want, atol=1e-5, rtol=1e-5)
 
 
 @pytest.mark.parametrize("arm", ARMS)
@@ -69,6 +83,9 @@ def test_batched_loss_and_gradients_equal_the_per_bag_sum(arm):
     loss_old = 0.0
     for j in idx:
         s_hat, pen = _old_terms(old, bags[j])
+        if arm == "binary_sup":
+            loss_old = loss_old + O5.bce(s_hat, float(bags[j]["y"]), ow) + pen
+            continue
         loss_old = loss_old + (ow if bags[j]["y"] else 1.0) * (s_hat - bags[j]["s"]).pow(2).mean() + pen
     loss_old = loss_old / len(idx)
     loss_old.backward()

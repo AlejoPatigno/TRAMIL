@@ -19,17 +19,20 @@ units to an explicit id list or to a shard "i/n" (1-based, units[i-1::n]). dispa
 CLI: python -m TRAMIL.e1v07_run {search,real,perm,report} [--out DIR] [--input ROOT] [--shard i/n]
      [--units id,id] [--workers N] [--limit-bags N] [--max-epochs N] [--r-pi N]."""
 import argparse
+import fnmatch
 import json
 import os
+import pickle
 import shutil
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
 import torch
 from sklearn.metrics import average_precision_score, balanced_accuracy_score, f1_score, recall_score
 
-from . import comparators, dispatch, e1_arms, frontend, hpo, item_training, pooled_stats, statistics, validation
+from . import comparators, dispatch, e1_arms, frontend, frozen, hpo, item_training, pooled_stats, statistics, validation
 
 __provenance__ = {
     "revision": "experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v07.md",
@@ -44,6 +47,7 @@ __provenance__ = {
         "a_real_unit_never_reads_its_outer_test_subjects_for_fitting",
         "kernel_output_wavlm_cache_is_discovered_below_the_input_root",
         "sharded_search_kernels_feed_a_real_kernel_through_mounted_outputs",
+        "a_real_run_zips_its_units_after_a_verified_zip_and_import_reads_zips_and_loose_json",
     ],
 }
 
@@ -61,7 +65,7 @@ LABELS = {"full": "Full model", "abmil8": "ABMIL-8", "gated_abmil8": "Gated ABMI
           "prompt_only": "Prompt-only reference (E5)", "permuted": "Permuted target (E2)",
           "untargeted": "Untargeted (E2, exploratory)", "r12": "r12 reference (E2, exploratory)"}
 DEFAULTS = dict(reps=REPS, seeds=SEEDS, K=hpo.K_GRID, P=hpo.P_GRID, max_epochs=item_training.MAX_EPOCHS, r_pi=R_PI,
-                arms=tuple(e1_arms.ARMS), kstar_arms=hpo.KSTAR_ARMS, B=pooled_stats.B)
+                arms=tuple(e1_arms.E1_ARMS), kstar_arms=hpo.KSTAR_ARMS, B=pooled_stats.B)
 
 
 # ---------------- units ----------------
@@ -129,13 +133,18 @@ def permuted_items(items, r):
     return [dict(it, s=np.asarray(s, np.float32), y=int(s.sum() >= item_training.THRESHOLD)) for it, s in zip(items, S)]
 
 
-def _bags(data, key, items, tr, ev, k, source):
-    """Prepared fold bags collated once into padded tensors on the training device, cached per worker."""
+def _bags(data, key, items, tr, ev, k, source, post=None):
+    """Prepared fold bags collated once into padded tensors on the training device, cached per worker. post(train
+    bags, train indices) may change the prepared training bags before they are collated (E5 derangement target); the
+    key must then tell the variants apart."""
     cache = data.setdefault("cache", {})
     if key not in cache:
         tb, eb, info = frontend.fold_bags(items, tr, ev, k=k, source=source)
+        if post is not None:
+            post(tb, tr)
         dev = item_training.device()
         cache[key] = (item_training.collate(tb, dev), item_training.collate(eb, dev), info["vbar"])
+        cache[("fe",) + key] = info["frontend"]  # the fitted front end, persisted with the real units (frozen.py)
     return cache[key]
 
 
@@ -184,6 +193,8 @@ def run_unit(spec, data):
         svc = pipe.named_steps["svc"]
         out.update(oof={str(items[i]["subject"]): float(v) for i, v in zip(test, sc)},
                    grid={"svc__kernel": [svc.kernel], "svc__C": [float(svc.C)]})
+        if spec["phase"] == "real":
+            out["_files"] = {".pkl": pickle.dumps(pipe)}
     else:
         source = e1_arms.SOURCE.get(spec["model"], "X")
         k = min(spec["k"], items[0][source].shape[1])
@@ -193,13 +204,17 @@ def run_unit(spec, data):
             curves = [_train_inner({**spec, "inner": r}, data, items, train, k, source, pkey)
                       for r in range(hpo.INNER_FOLDS)]
             e = item_training.select_epoch(curves)
-            tb, eb, vbar = _bags(data, (pkey, spec["rep"], spec["fold"], "outer", k, source), items, train, test, k,
-                                 source)
+            key = (pkey, spec["rep"], spec["fold"], "outer", k, source)
+            tb, eb, vbar = _bags(data, key, items, train, test, k, source)
             make = e1_arms.build(spec["model"], k=k, p_drop=spec["p"], vbar=vbar, Q=data.get("Q"))
             m, _ = item_training.train(make, tb, e, spec["seed"])
             P = item_training.predict(m, eb)
             out.update(epoch=e, curves=[[float(v) for v in c] for c in curves],
                        oof={str(items[i]["subject"]): [float(v) for v in row] for i, row in zip(test, P)})
+            if spec["phase"] == "real":  # frozen model and front end: E6 and E7 run inference only (frozen.py)
+                fe = frozen.fe_name(spec, k, source)
+                out["_files"] = {".pt": frozen.pack_state(spec, m, vbar, k, e, [items[i] for i in test], fe)}
+                out["_frontend"] = (fe, frozen.pack_frontend(data["cache"][("fe",) + key]))
     _sync()
     out["seconds"] = time.perf_counter() - t0
     return out
@@ -211,6 +226,24 @@ def _write(path, obj):
     tmp = Path(str(path) + ".tmp")
     tmp.write_text(json.dumps(obj, indent=1))
     os.replace(tmp, path)
+
+
+def _put(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def write_unit(d, name, r):
+    """A unit's files under d: the companion binaries first (the state of a unit whose JSON exists is never missing), the
+    front end once per (rep, fold, k, source) beside d, the result JSON last (its existence marks the unit done)."""
+    files, fe = r.pop("_files", {}), r.pop("_frontend", None)
+    if fe and not (Path(d).parent / "frontend" / f"{fe[0]}.pt").exists():
+        _put(Path(d).parent / "frontend" / f"{fe[0]}.pt", fe[1])
+    for ext, data in files.items():
+        _put(Path(d) / f"{name}{ext}", data)
+    _write(Path(d) / f"{name}.json", r)
 
 
 def _load_dir(d):
@@ -239,7 +272,7 @@ def run_phase(phase, data, out, workers=1, shard=None, only=None, **cfg):
     _freeze_complete(out, c)  # search units imported from other shards' kernels
     specs = select(units(phase, out, **c), shard, only)
     pending = [s for s in specs if not (out / phase / f"{uid(s)}.json").exists()]
-    dispatch.run(run_unit, pending, data, workers, on_result=lambda s, r: _write(out / phase / f"{uid(s)}.json", r))
+    dispatch.run(run_unit, pending, data, workers, on_result=lambda s, r: write_unit(out / phase, uid(s), r))
     _freeze_complete(out, c)
     return {"ran": [uid(s) for s in pending], "skipped": len(specs) - len(pending)}
 
@@ -263,7 +296,9 @@ def _score_matrix(results, subjects, reps):
         if len(rows) != reps:
             continue
         A = np.asarray(rows, float)
-        if A.ndim == 3:
+        if A.ndim == 3 and A.shape[-1] == 1:  # a binary-head model (E4 H3): the logit, no item profile
+            scores[arm] = A[..., 0]
+        elif A.ndim == 3:
             profiles[arm], scores[arm] = A, A.sum(-1)
         else:
             scores[arm] = A
@@ -445,26 +480,119 @@ def _input_roots(input_root=None):
     return roots or ["TRAMIL/Data"]
 
 
-def import_upstream(roots, out):
-    """Copy earlier kernels' unit results (every E1_v07/{search,hpo,real,perm}/*.json found below the roots) into out;
-    an existing file is never overwritten. Returns the number of files copied."""
-    out, n = Path(out), 0
+NAME = "E1_v07"  # the folder name results live under, and the prefix of the zips
+
+
+def _shard_tag(shard):
+    return "" if not shard else "_s{}of{}".format(*str(shard).split("/"))
+
+
+ALL_EXTS = (".json", ".pt", ".pkl")
+
+
+def _members(zf, subs, exts=(".json",)):
+    """(member, sub, file name) of every member <name>/<sub>/<file><ext>; anything else is ignored. The default reads unit
+    JSONs only: persisted models (.pt, .pkl) are read by frozen.Store, never imported as results."""
+    for m in zf.namelist():
+        parts = m.split("/")
+        if len(parts) >= 2 and parts[-2] in subs and parts[-1].endswith(tuple(exts)) and ".." not in parts:
+            yield m, parts[-2], parts[-1]
+
+
+def _extract(zpath, out, subs):
+    """Unit JSONs of one zip that out does not hold yet; returns the files written."""
+    got = []
+    with zipfile.ZipFile(zpath) as zf:
+        for m, sub, fn in _members(zf, subs):
+            dst = out / sub / fn
+            if not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(zf.read(m))
+                got.append(dst)
+    return got
+
+
+def unpack_own_zips(out, name=NAME, subs=RESULT_DIRS, phases=None):
+    """Resume: the zips this job wrote earlier in out (those of `phases`, default all) give their units back as loose
+    files (never overwriting)."""
+    pats = [f"{name}*.zip"] if phases is None else [f"{name}_{ph}*.zip" for ph in phases]
+    return sum(len(_extract(z, Path(out), subs)) for pat in pats for z in sorted(Path(out).glob(pat)))
+
+
+def import_upstream_files(roots, out, name=NAME, subs=RESULT_DIRS):
+    """Earlier kernels' unit results below the roots, copied into out: loose <name>/{subs}/*.json and every member of
+    <name>*.zip found anywhere (os.walk, whatever the mount layout). An existing file is never overwritten. Returns the
+    files written."""
+    out, got = Path(out), []
     for root in map(Path, roots):
         if not root.is_dir():
             continue
-        for here, dirs, _ in os.walk(root):
+        for here, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if not d.startswith(("instances_audio", "src", "."))]
-            if Path(here).name != "E1_v07" or Path(here).resolve() == out.resolve():
+            here = Path(here)
+            if here.resolve() == out.resolve():
+                dirs[:] = []
                 continue
-            for sub in RESULT_DIRS:
-                for f in sorted((Path(here) / sub).glob("*.json")):
-                    dst = out / sub / f.name
-                    if not dst.exists():
-                        dst.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy(f, dst)
-                        n += 1
-            dirs[:] = []
-    return n
+            for z in sorted(f for f in files if fnmatch.fnmatch(f, f"{name}*.zip")):
+                got += _extract(here / z, out, subs)
+            if here.name == name:
+                for sub in subs:
+                    for f in sorted((here / sub).glob("*.json")):
+                        dst = out / sub / f.name
+                        if not dst.exists():
+                            dst.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy(f, dst)
+                            got.append(dst)
+                dirs[:] = []
+    return got
+
+
+def import_upstream(roots, out, name=NAME, subs=RESULT_DIRS):
+    """Number of files import_upstream_files copied."""
+    return len(import_upstream_files(roots, out, name, subs))
+
+
+def zip_outputs(out, phases, shard=None, exclude=(), name=NAME):
+    """One zip <name>_<phase>[_s<i>of<n>].zip per phase (not the report) holding every loose unit JSON of out/<phase> as
+    <name>/<phase>/<file>.json, plus out/hpo/*.json in a search zip. Written under a .part name, verified (testzip and
+    member count), renamed, and only then are the loose unit JSONs deleted (hpo stays loose). Units already inside an
+    earlier zip of the same name are kept. `exclude` lists imported files that are not this job's own."""
+    out, zips = Path(out), []
+    skip = {Path(p).resolve() for p in exclude}
+    for ph in [p for p in phases if p != "report"]:
+        loose = {(ph, f.name): f for e in ALL_EXTS for f in sorted((out / ph).glob("*" + e)) if f.resolve() not in skip}
+        if ph == "real":  # the front ends the states refer to
+            loose |= {("frontend", f.name): f for f in sorted((out / "frontend").glob("*.pt")) if f.resolve() not in skip}
+        if ph == "search":
+            loose |= {("hpo", f.name): f for f in sorted((out / "hpo").glob("*.json")) if f.resolve() not in skip}
+        if not loose:
+            continue
+        final = out / f"{name}_{ph}{_shard_tag(shard)}.zip"
+        part = Path(str(final) + ".part")
+        old = {}
+        if final.exists():
+            with zipfile.ZipFile(final) as zf:
+                old = {(sub, fn): zf.read(m) for m, sub, fn in _members(zf, (ph, "hpo", "frontend"), ALL_EXTS)}
+        try:
+            with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as zf:
+                for (sub, fn), data in old.items():
+                    if (sub, fn) not in loose:
+                        zf.writestr(f"{name}/{sub}/{fn}", data)
+                for (sub, fn), f in loose.items():
+                    zf.write(f, f"{name}/{sub}/{fn}")
+            want = len(set(old) | set(loose))
+            with zipfile.ZipFile(part) as zf:
+                bad = zf.testzip()
+                if bad is not None or len(zf.namelist()) != want:
+                    raise RuntimeError(f"zip verification failed ({bad!r}, {len(zf.namelist())} of {want} members)")
+            os.replace(part, final)
+        finally:
+            part.unlink(missing_ok=True)
+        for (sub, _), f in loose.items():
+            if sub != "hpo":
+                f.unlink()
+        zips.append(final)
+    return zips
 
 
 def load_data(input_root=None, limit_bags=None):
@@ -489,18 +617,27 @@ def _default_out():
 def run(phases, out_dir=None, input_root=None, shard=None, units=None, workers=1, limit_bags=None,
         import_from_inputs=True, **cfg):
     """Remote callable (run-config.json): phases is one phase or a list run in order (a smoke chains them at a tiny
-    scale). Earlier kernels' results mounted under the input roots are imported first; shard.json under the runner."""
+    scale). Earlier kernels' results mounted under the input roots (loose or zipped) are imported first; shard.json
+    under the runner. A real run (no limit_bags) ends by zipping its unit results (zip_outputs) and dropping the loose
+    copies of the imported ones; a smoke keeps everything loose."""
     from . import e1_run
 
     phases = [phases] if isinstance(phases, str) else list(phases)
     out = Path(out_dir) if out_dir else _default_out()
     out.mkdir(parents=True, exist_ok=True)
-    imported = import_upstream(_input_roots(input_root), out) if import_from_inputs else 0
+    unpack_own_zips(out, phases=phases)
+    got = import_upstream_files(_input_roots(input_root), out) if import_from_inputs else []
+    imported = len(got)
     data, info = load_data(input_root, limit_bags)
     summary = {"imported": imported, "workers": workers, "shard": shard, **info}
     for ph in phases:
         res = run_phase(ph, data, out, workers=workers, shard=shard, only=units, **cfg)
         summary[ph] = {"ran": len(res["ran"]), "skipped": res.get("skipped", 0)}
+    if limit_bags is None:
+        summary["zips"] = [z.name for z in zip_outputs(out, phases, shard, exclude=got)]
+        for f in got:
+            if f.parent.name != "hpo":
+                f.unlink(missing_ok=True)
     e1_run._stamp(summary)
     return summary
 
