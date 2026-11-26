@@ -270,7 +270,9 @@ def _score_matrix(results, subjects, reps):
         if len(rows) != reps:
             continue
         A = np.asarray(rows, float)
-        if A.ndim == 3:
+        if A.ndim == 3 and A.shape[-1] == 1:  # a binary-head model (E4 H3): the logit, no item profile
+            scores[arm] = A[..., 0]
+        elif A.ndim == 3:
             profiles[arm], scores[arm] = A, A.sum(-1)
         else:
             scores[arm] = A
