@@ -50,7 +50,7 @@ Remote launches need the operator's explicit go; G-EXP-POC is the operator's app
       Route: delegated; GPU measurement runs on Kaggle after operator go.
 - [ ] T8 (folders generated, launch pending operator go) Kaggle jobs e1-v07-{search,real,perm} with the WavLM dataset, smoke unit, merge/report scripts.
       Route: inline (remote-execution).
-- [ ] T9 G-EXP-POC evidence pack for the operator.
+- [x] T9 G-EXP-POC: the operator verified the PoC (E0b) with `smith novelty approve --gate poc` on 2026-11-26T16:47:16Z; full experiments unlocked.
 
 ## Acceptance
 - Full suite green under the target venv; new invariants tested (Ec. 91 rule, label permutation as a unit, DeLong
