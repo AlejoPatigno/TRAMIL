@@ -23,6 +23,9 @@ __provenance__ = {
         "prepared_bags_carry_targets_permuted_target_and_reference_graph",
         "prompt_source_builds_the_input_from_the_uncentered_prompt_rows_and_never_the_audio",
         "rc_scale_makes_the_zero_surrogate_penalty_one",
+        "quintile_derangement_has_no_fixed_point_and_keeps_donors_in_the_size_quintile",
+        "donor_rows_are_taken_in_order_and_cycled_to_the_recipient_count",
+        "history_removal_drops_the_listed_prompts_and_refuses_empty_matches_and_bags",
     ],
 }
 
@@ -78,3 +81,61 @@ def fold_bags(items, train_idx, eval_idx, k, source="X"):
     tr = [prepare(items[i], fe, source) for i in train_idx]
     ev = [prepare(items[i], fe, source) for i in eval_idx]
     return tr, ev, {"vbar": rc_scale(tr), "k": k, "frontend": fe}
+
+
+def quintile_derangement(sizes, seed):
+    """E5 control (d): donor index of every training subject, a derangement inside each quintile of segment count (the
+    subjects sorted by count, ties by position, cut into five groups; a group of one is merged into its neighbour). Each
+    quintile is shuffled with the seed and every subject takes the next one of the shuffled cycle, so nobody keeps its
+    own target and donors share the recipient's size class."""
+    sizes = np.asarray(sizes)
+    groups = [list(g) for g in np.array_split(np.argsort(sizes, kind="stable"), 5)]
+    merged = []
+    for g in groups:
+        if merged and len(g) < 2:
+            merged[-1] += g
+        else:
+            merged.append(g)
+    if len(merged[0]) < 2:
+        merged = [merged[0] + merged[1], *merged[2:]] if len(merged) > 1 else merged
+    rng, donor = np.random.default_rng(seed), np.empty(len(sizes), int)
+    for g in merged:
+        order = rng.permutation(g)
+        donor[order] = np.roll(order, -1)
+    return donor
+
+
+def retarget_quint(bags, items, donor):
+    """Penalty target of control (d), in place: the Rc_perm of bag b is the donor's raw prompt rows taken in order and
+    truncated or cycled to N_b, centered per bag (Ec. 90). Only the target moves; Y, R, Rc and G are untouched."""
+    for b, d in zip(bags, donor):
+        n = len(b["Y"])
+        R = np.asarray(items[d]["R"], np.float32)
+        P = R[np.arange(n) % len(R)]
+        b["Rc_perm"] = torch.from_numpy(np.ascontiguousarray(P - P.mean(0)))
+    return bags
+
+
+def normalize_prompt(t):
+    """Lower case, letters and digits only, single spaces: the form in which history prompts are listed and matched."""
+    return " ".join("".join(c if c.isalnum() else " " for c in str(t).lower()).split())
+
+
+def drop_history(items, history):
+    """E5 control (e): the items without the segments whose normalized interviewer prompt is in `history` (the list
+    frozen in the run configuration). Needs it["prompts"] aligned with the segments; refuses when it is missing, when
+    nothing matches, or when a subject would be left with no segment."""
+    hist = {normalize_prompt(h) for h in history}
+    out, hit = [], 0
+    for it in items:
+        if "prompts" not in it:
+            raise ValueError("items carry no interviewer prompts; the history control needs it['prompts']")
+        keep = np.array([normalize_prompt(p) not in hist for p in it["prompts"]])
+        hit += int((~keep).sum())
+        if not keep.any():
+            raise ValueError(f"removing the history prompts empties subject {it['subject']}")
+        out.append({**it, **{k: np.asarray(it[k])[keep] for k in ("X", "R")},
+                    "prompts": [p for p, k in zip(it["prompts"], keep) if k]})
+    if not hit:
+        raise ValueError("no segment matched the history prompt list")
+    return out
