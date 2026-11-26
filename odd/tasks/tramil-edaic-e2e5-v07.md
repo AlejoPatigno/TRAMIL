@@ -45,6 +45,16 @@ in use (real/perm/report at ebf6647) are not regenerated.
 - [x] U3.5 report E2 to E5 (commit e10a5f8)
 - [x] U3.6 job folders pinned to 7f541b6, pushed
 - [x] U3.7 CPU timing estimate per new arm
+- [x] U4 Persist frozen models: a real unit stores its state_dict and the fitted front end (zip members real/<uid>.pt,
+  frontend/<name>.pt, SVM real/<uid>.pkl) and frozen.Store/load/predict read them back for inference only (E6, E7)
+
+## Operator decisions (2026-11-26)
+1. Open question 1 ACCEPTED: keep the full_x, permuted_x, untargeted_x re-fits (~540 extra fits). Operator: "this kind of
+   thing must not happen again; avoid spending GPU unnecessarily".
+2. New task U4: every real unit (E1 and e2e5 runners) must persist everything a later experiment can need, so no
+   downstream experiment re-fits a trained model (state_dict, frozen front end, OOF attention and diagnostics, all inside
+   the job's verified zip), with loaders so E6 and E7 run inference only.
+3. Run the full suite once before committing and report the counts.
 
 ## Acceptance evidence
 - Full suite with worktree src: 332 passed, 3 skipped (331 passed + the one fixed test, re-run alone: test_item_comparators +
@@ -60,8 +70,38 @@ in use (real/perm/report at ebf6647) are not regenerated.
 full 62 s | graph_corr 51 s | graph_prior 37 s | binary_sup 50 s | free_desc 48 s | free_zero 48 s | permuted_quint 58 s | full_x 52 s
 Real unit = 3 inner fits + 1 refit = 4 fits. Search unit = 1 fit.
 
+## U4 frozen models: what is persisted, size, gaps (spec [exp:E6] line 481, [exp:E7] line 555)
+Persisted per real unit (E1 and e2e5 runners, phase real only; searches and permutation nulls store nothing):
+`<uid>.pt` = state_dict (float32, cpu), arm, k, p, vbar, selected epoch, held-out subject order, front end name;
+`frontend/fe_r{rep}_f{fold}_k{k}_{source}[_nohist].pt` = scaler (mu, sd) and V_k fitted on the outer training subjects
+only, written once per (rep, fold, k, source); SVM units `<uid>.pkl` (pickled pipeline). Already stored in the unit JSON:
+OOF item predictions, and for the e2e5 arms the per-subject attention columns, ranks, F_eff, surrogate fidelity, Al,
+RMS(Delta) and drift. The files are written before the JSON (JSON present means the unit is complete), travel in the
+job zip, survive resume, and are never copied by report imports. `frozen.Store(roots)` indexes loose files and zips
+anywhere; `frozen.load` rebuilds model, held-out bags and items; test: stored models reproduce their stored OOF
+predictions and extras to 1e-5 by inference only, and the front end equals one fitted on the training subjects.
+Size (k = 128, measured with real shapes, random weights, compressed): state 30 KB per full-like model (8017 params,
+float32; 16 to 31 KB for the others), front end 0.37 MB per (rep, fold, k) at k <= 128 and 2.1 MB for the k = 768
+rotation ablation. e2e5-real-a/b (about 200 units each, k* <= 128 front ends): about 12 MB per job. E1 real jobs
+(about 500 units, plus the k = 768 front ends): about 15 MB of states plus up to 25 MB of front ends, ~30 MB per job
+if the E1 jobs are regenerated from this branch.
+
+Inputs E6 and E7 need that are STILL NOT persisted or not available:
+- E1 real jobs in use (pinned ebf6647) predate U4 and store no models: the E6 arms abmil8, gated_abmil8, symptom_guided,
+  r06_8, abmil_r8 (and E7 prompt_only, r12, abmil8, gated_abmil8, abmil_r8) have NO frozen models. Full and permuted are
+  covered by full_x and permuted_x of e2e5-real. Fix options (operator decision, not done): regenerate e1v07-real-a/b
+  from this branch before they run, or add `*_x` aliases for those arms to e2e5-real (225 units for the five E6 arms).
+  The SVM pipelines of E1 are likewise absent.
+- E6: response texts per segment and the NLI relevance matrix S_b (new pass, checkpoint and templates to pre-register); the
+  loader gives no segment text. The deletion-pass, LiftSem (Ec. 49-60, 108-110) and Ec. 55 code do not exist yet
+  (inference needs only the stored models and the bags, which Store.load provides).
+- E7: the spec says "trained on the Wizard-of-Oz training subjects only ... frozen models of E1" but no model refit on all
+  141 subjects exists (E1 trains per outer fold only). Either E7 ensembles the 45 fold models per arm (persisted, each
+  with its own front end) or a refit-on-all job is needed: operator decision. Also absent: features and bags of the 56
+  test sessions and 30 agent-led sessions, the prompt reconstruction, the Ec. 111 thresholds and the hand transcriptions.
+
 ## Open questions for the operator
-1. E1 real units lack attention, fidelity and graph diagnostics, so full, permuted, untargeted must be re-run as `*_x` aliases (extra fits, E1 k* and p*).
+1. ACCEPTED by the operator (see decisions). E1 real units lack attention, fidelity and graph diagnostics, so full, permuted, untargeted must be re-run as `*_x` aliases (extra fits, E1 k* and p*).
 2. binary_sup: spec ambiguous on whether the surrogate penalty (mu_R = 1/vbar) stays. Kept; epoch selection uses class-weighted BCE.
 3. Percentile ranks for the H3 variance are computed over all out-of-fold subjects of each (rep, seed) run; spec ambiguous between per-fold and per-run.
 4. Weighted kappa = quadratic kappa averaged over the items.

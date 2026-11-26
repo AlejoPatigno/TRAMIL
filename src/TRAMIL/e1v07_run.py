@@ -22,6 +22,7 @@ import argparse
 import fnmatch
 import json
 import os
+import pickle
 import shutil
 import time
 import zipfile
@@ -31,7 +32,7 @@ import numpy as np
 import torch
 from sklearn.metrics import average_precision_score, balanced_accuracy_score, f1_score, recall_score
 
-from . import comparators, dispatch, e1_arms, frontend, hpo, item_training, pooled_stats, statistics, validation
+from . import comparators, dispatch, e1_arms, frontend, frozen, hpo, item_training, pooled_stats, statistics, validation
 
 __provenance__ = {
     "revision": "experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v07.md",
@@ -143,6 +144,7 @@ def _bags(data, key, items, tr, ev, k, source, post=None):
             post(tb, tr)
         dev = item_training.device()
         cache[key] = (item_training.collate(tb, dev), item_training.collate(eb, dev), info["vbar"])
+        cache[("fe",) + key] = info["frontend"]  # the fitted front end, persisted with the real units (frozen.py)
     return cache[key]
 
 
@@ -191,6 +193,8 @@ def run_unit(spec, data):
         svc = pipe.named_steps["svc"]
         out.update(oof={str(items[i]["subject"]): float(v) for i, v in zip(test, sc)},
                    grid={"svc__kernel": [svc.kernel], "svc__C": [float(svc.C)]})
+        if spec["phase"] == "real":
+            out["_files"] = {".pkl": pickle.dumps(pipe)}
     else:
         source = e1_arms.SOURCE.get(spec["model"], "X")
         k = min(spec["k"], items[0][source].shape[1])
@@ -200,13 +204,17 @@ def run_unit(spec, data):
             curves = [_train_inner({**spec, "inner": r}, data, items, train, k, source, pkey)
                       for r in range(hpo.INNER_FOLDS)]
             e = item_training.select_epoch(curves)
-            tb, eb, vbar = _bags(data, (pkey, spec["rep"], spec["fold"], "outer", k, source), items, train, test, k,
-                                 source)
+            key = (pkey, spec["rep"], spec["fold"], "outer", k, source)
+            tb, eb, vbar = _bags(data, key, items, train, test, k, source)
             make = e1_arms.build(spec["model"], k=k, p_drop=spec["p"], vbar=vbar, Q=data.get("Q"))
             m, _ = item_training.train(make, tb, e, spec["seed"])
             P = item_training.predict(m, eb)
             out.update(epoch=e, curves=[[float(v) for v in c] for c in curves],
                        oof={str(items[i]["subject"]): [float(v) for v in row] for i, row in zip(test, P)})
+            if spec["phase"] == "real":  # frozen model and front end: E6 and E7 run inference only (frozen.py)
+                fe = frozen.fe_name(spec, k, source)
+                out["_files"] = {".pt": frozen.pack_state(spec, m, vbar, k, e, [items[i] for i in test], fe)}
+                out["_frontend"] = (fe, frozen.pack_frontend(data["cache"][("fe",) + key]))
     _sync()
     out["seconds"] = time.perf_counter() - t0
     return out
@@ -218,6 +226,24 @@ def _write(path, obj):
     tmp = Path(str(path) + ".tmp")
     tmp.write_text(json.dumps(obj, indent=1))
     os.replace(tmp, path)
+
+
+def _put(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def write_unit(d, name, r):
+    """A unit's files under d: the companion binaries first (the state of a unit whose JSON exists is never missing), the
+    front end once per (rep, fold, k, source) beside d, the result JSON last (its existence marks the unit done)."""
+    files, fe = r.pop("_files", {}), r.pop("_frontend", None)
+    if fe and not (Path(d).parent / "frontend" / f"{fe[0]}.pt").exists():
+        _put(Path(d).parent / "frontend" / f"{fe[0]}.pt", fe[1])
+    for ext, data in files.items():
+        _put(Path(d) / f"{name}{ext}", data)
+    _write(Path(d) / f"{name}.json", r)
 
 
 def _load_dir(d):
@@ -246,7 +272,7 @@ def run_phase(phase, data, out, workers=1, shard=None, only=None, **cfg):
     _freeze_complete(out, c)  # search units imported from other shards' kernels
     specs = select(units(phase, out, **c), shard, only)
     pending = [s for s in specs if not (out / phase / f"{uid(s)}.json").exists()]
-    dispatch.run(run_unit, pending, data, workers, on_result=lambda s, r: _write(out / phase / f"{uid(s)}.json", r))
+    dispatch.run(run_unit, pending, data, workers, on_result=lambda s, r: write_unit(out / phase, uid(s), r))
     _freeze_complete(out, c)
     return {"ran": [uid(s) for s in pending], "skipped": len(specs) - len(pending)}
 
@@ -461,11 +487,15 @@ def _shard_tag(shard):
     return "" if not shard else "_s{}of{}".format(*str(shard).split("/"))
 
 
-def _members(zf, subs):
-    """(member, sub, file name) of every unit JSON member <name>/<sub>/<file>.json; anything else is ignored."""
+ALL_EXTS = (".json", ".pt", ".pkl")
+
+
+def _members(zf, subs, exts=(".json",)):
+    """(member, sub, file name) of every member <name>/<sub>/<file><ext>; anything else is ignored. The default reads unit
+    JSONs only: persisted models (.pt, .pkl) are read by frozen.Store, never imported as results."""
     for m in zf.namelist():
         parts = m.split("/")
-        if len(parts) >= 2 and parts[-2] in subs and parts[-1].endswith(".json") and ".." not in parts:
+        if len(parts) >= 2 and parts[-2] in subs and parts[-1].endswith(tuple(exts)) and ".." not in parts:
             yield m, parts[-2], parts[-1]
 
 
@@ -530,7 +560,9 @@ def zip_outputs(out, phases, shard=None, exclude=(), name=NAME):
     out, zips = Path(out), []
     skip = {Path(p).resolve() for p in exclude}
     for ph in [p for p in phases if p != "report"]:
-        loose = {(ph, f.name): f for f in sorted((out / ph).glob("*.json")) if f.resolve() not in skip}
+        loose = {(ph, f.name): f for e in ALL_EXTS for f in sorted((out / ph).glob("*" + e)) if f.resolve() not in skip}
+        if ph == "real":  # the front ends the states refer to
+            loose |= {("frontend", f.name): f for f in sorted((out / "frontend").glob("*.pt")) if f.resolve() not in skip}
         if ph == "search":
             loose |= {("hpo", f.name): f for f in sorted((out / "hpo").glob("*.json")) if f.resolve() not in skip}
         if not loose:
@@ -540,7 +572,7 @@ def zip_outputs(out, phases, shard=None, exclude=(), name=NAME):
         old = {}
         if final.exists():
             with zipfile.ZipFile(final) as zf:
-                old = {(sub, fn): zf.read(m) for m, sub, fn in _members(zf, (ph, "hpo"))}
+                old = {(sub, fn): zf.read(m) for m, sub, fn in _members(zf, (ph, "hpo", "frontend"), ALL_EXTS)}
         try:
             with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as zf:
                 for (sub, fn), data in old.items():

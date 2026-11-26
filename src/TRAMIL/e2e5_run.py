@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from . import dispatch, e1_arms, e1v07_run as e1, e2e5_stats as st, frontend, hpo, item_training, pooled_stats, validation
+from . import dispatch, e1_arms, e1v07_run as e1, e2e5_stats as st, frontend, frozen, hpo, item_training, pooled_stats, validation
 
 __provenance__ = {
     "revision": "experiments-experimental-plan-for-the-residual-semantic-prior-bipartite-v07.md",
@@ -47,7 +47,7 @@ DER_SEED = 2026  # quintile derangement of the fit (rep, fold, inner or outer, s
 # full_nohist is opt-in: it needs the frozen history prompt list (history_prompts), which real data does not carry yet
 DEFAULTS = dict(reps=e1.REPS, seeds=e1.SEEDS, P=hpo.P_GRID, max_epochs=item_training.MAX_EPOCHS,
                 arms=tuple(a for a in e1_arms.E2E5_ARMS if a != "full_nohist"), B=pooled_stats.B, k_star=None, p_alias=None, history_prompts=None)
-OWN_SUBS = ("search", "hpo", "real")
+OWN_SUBS = ("search", "hpo", "real")  # frozen models travel in the same zips (frontend/ and real/*.pt)
 IMPORT_E1 = {"search": ("hpo",), "real": ("hpo",), "report": ("real", "perm", "hpo")}
 IMPORT_OWN = {"search": ("search", "hpo"), "real": ("search", "hpo"), "report": ("real",)}
 
@@ -124,7 +124,7 @@ def _bags(spec, data, items, tr, ev, k, tag, rec):
     elif spec["arm"] == "full_nohist":
         salt = "nohist"
     key = (spec.get("perm", -1), spec["rep"], spec["fold"], "outer" if tag == 9 else tag, k, "X", salt)
-    return e1._bags(data, key, items, tr, ev, k, "X", post)
+    return (*e1._bags(data, key, items, tr, ev, k, "X", post), data["cache"][("fe",) + key])
 
 
 def _extras(m, eb, items_test):
@@ -163,7 +163,7 @@ def run_unit(spec, data):
 
     def inner(r):
         tr, va = validation.inner_splits(y, train, spec["fold"])[r]
-        tb, vb, vbar = _bags(spec, data, items, tr, va, k, r, rec)
+        tb, vb, vbar, _ = _bags(spec, data, items, tr, va, k, r, rec)
         make = e1_arms.build(spec["model"], k=k, p_drop=spec["p"], vbar=vbar, Q=data.get("Q"))
         return item_training.train(make, tb, spec["max_epochs"], spec["seed"], eval_bags=vb)[1]
 
@@ -172,7 +172,7 @@ def run_unit(spec, data):
     else:
         curves = [inner(r) for r in range(hpo.INNER_FOLDS)]
         e = item_training.select_epoch(curves)
-        tb, eb, vbar = _bags(spec, data, items, train, test, k, 9, rec)
+        tb, eb, vbar, fe = _bags(spec, data, items, train, test, k, 9, rec)
         make = e1_arms.build(spec["model"], k=k, p_drop=spec["p"], vbar=vbar, Q=data.get("Q"))
         m, _ = item_training.train(make, tb, e, spec["seed"])
         P = item_training.predict(m, eb)
@@ -180,6 +180,9 @@ def run_unit(spec, data):
                    oof={str(items[i]["subject"]): [float(v) for v in row] for i, row in zip(test, P)},
                    extra=_extras(m, eb, [items[i] for i in test]),
                    drift=[float(v) for v in m.query_drift().detach()] if getattr(m, "free", None) == "desc" else None)
+        name = frozen.fe_name(spec, k, "X")
+        out["_files"] = {".pt": frozen.pack_state(spec, m, vbar, k, e, [items[i] for i in test], name)}
+        out["_frontend"] = (name, frozen.pack_frontend(fe))
         if rec:
             out["derangement_seeds"] = rec
         if spec["arm"] == "full_nohist":
@@ -231,7 +234,7 @@ def run_phase(phase, data, out, workers=1, shard=None, only=None, **cfg):
     _freeze_complete(out, c)
     specs = e1.select(units(phase, out, **c), shard, only)
     pending = [s for s in specs if not (out / phase / f"{e1.uid(s)}.json").exists()]
-    dispatch.run(run_unit, pending, data, workers, on_result=lambda s, r: e1._write(out / phase / f"{e1.uid(s)}.json", r))
+    dispatch.run(run_unit, pending, data, workers, on_result=lambda s, r: e1.write_unit(out / phase, e1.uid(s), r))
     _freeze_complete(out, c)
     return {"ran": [e1.uid(s) for s in pending], "skipped": len(specs) - len(pending)}
 

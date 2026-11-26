@@ -135,5 +135,6 @@ def test_a_real_run_zips_under_the_e2e5_name_and_a_smoke_keeps_loose_units(tmp_p
     assert not list((real / "real").glob("*.json")) and not list((real / "search").glob("*.json"))
     assert len(list((real / "hpo").glob("hpo_r0_f*.json"))) == 5 and len(list((real / "hpo").glob("e2e5_r0_f*.json"))) == 5
     with zipfile.ZipFile(real / "E2E5_v07_real_s1of2.zip") as z:
-        assert all(n.startswith("E2E5_v07/real/") for n in z.namelist())
+        assert all(n.startswith(("E2E5_v07/real/", "E2E5_v07/frontend/")) for n in z.namelist())
+        assert any(n.endswith(".pt") and "/real/" in n for n in z.namelist()) and any("/frontend/" in n for n in z.namelist())
     assert run.run("real", real, input_root=str(tmp_path / "in"), shard="1/2", **small)["real"]["ran"] == 0  # resumed from the zip
