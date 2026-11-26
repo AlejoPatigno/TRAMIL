@@ -82,7 +82,7 @@ def test_every_e1_arm_builds_trains_one_epoch_and_predicts_finite_items():
         make = e1_arms.build(arm, k=k, p_drop=0.15, vbar=info["vbar"], Q=_Q())
         m, curve = item_training.train(make, tr, 1, 11, eval_bags=ev)
         assert len(curve) == 1 and np.isfinite(curve).all(), arm
-        assert item_training.predict(m, ev).shape == (2, 8), arm
+        assert item_training.predict(m, ev).shape == (2, 1 if arm == "binary_sup" else 8), arm  # binary head: one logit
     assert set(e1_arms.ARMS) >= {"full", "permuted", "untargeted", "r12", "prompt_only", "abmil8", "gated_abmil8",
                                  "abmil_r8", "r06_8", "symptom_guided"}
 
