@@ -64,7 +64,7 @@ LABELS = {"full": "Full model", "abmil8": "ABMIL-8", "gated_abmil8": "Gated ABMI
           "prompt_only": "Prompt-only reference (E5)", "permuted": "Permuted target (E2)",
           "untargeted": "Untargeted (E2, exploratory)", "r12": "r12 reference (E2, exploratory)"}
 DEFAULTS = dict(reps=REPS, seeds=SEEDS, K=hpo.K_GRID, P=hpo.P_GRID, max_epochs=item_training.MAX_EPOCHS, r_pi=R_PI,
-                arms=tuple(e1_arms.ARMS), kstar_arms=hpo.KSTAR_ARMS, B=pooled_stats.B)
+                arms=tuple(e1_arms.E1_ARMS), kstar_arms=hpo.KSTAR_ARMS, B=pooled_stats.B)
 
 
 # ---------------- units ----------------

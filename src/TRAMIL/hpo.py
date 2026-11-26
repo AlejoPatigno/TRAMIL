@@ -46,7 +46,7 @@ INNER_FOLDS = 3
 KSTAR_ARMS = ("full", "abmil8", "gated_abmil8", "symptom_guided", "r06_8", "abmil_r8")  # E1 neural arms
 
 
-def units(rep, fold, arms=tuple(e1_arms.ARMS), K=K_GRID, P=P_GRID, max_epochs=item_training.MAX_EPOCHS):
+def units(rep, fold, arms=tuple(e1_arms.E1_ARMS), K=K_GRID, P=P_GRID, max_epochs=item_training.MAX_EPOCHS):
     """Every independent unit of one outer training set, in a fixed order."""
     out = []
     for arm in arms:
@@ -132,7 +132,7 @@ def freeze(results, rep, fold, out_dir, grid, kstar_arms=KSTAR_ARMS):
     return out
 
 
-def run_fold(items, rep, fold, out_dir, Q=None, arms=tuple(e1_arms.ARMS), K=K_GRID, P=P_GRID,
+def run_fold(items, rep, fold, out_dir, Q=None, arms=tuple(e1_arms.E1_ARMS), K=K_GRID, P=P_GRID,
              max_epochs=item_training.MAX_EPOCHS, kstar_arms=KSTAR_ARMS):
     """Sequential search of one outer training set; writes and returns the frozen values."""
     res = [run_unit(s, items, Q) for s in units(rep, fold, arms, K, P, max_epochs)]
