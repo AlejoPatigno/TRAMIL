@@ -59,6 +59,14 @@ in use (real/perm/report at ebf6647) are not regenerated.
    symptom_guided_x, r06_8_x, abmil_r8_x, prompt_only_x, r12_x to e2e5-real (same frozen E1 k* and p*; prompt_only_x at
    k = 8) and svm_x (the E1 bag-level SVM again, same deterministic inner kernel/C search, pipeline persisted). Done (U4b).
 
+5. Q9 (delivery): single-pr for feat/edaic-e2e5-v07, one PR, size exception accepted by the operator (the orchestrator
+   opens it; this branch does not).
+6. E7 sealed test read: the ENSEMBLE of the 45 persisted fold models per arm (3 repetitions x 5 outer folds x 3 seeds), each
+   with its own frozen front end; no refit on all subjects. Ensemble rule (ASSUMPTION to confirm if the spec says
+   otherwise): mean of the predicted item scores across the 45 models, then the Ec. 76 decision on the summed score. The
+   bag-level SVM (15 pickled pipelines, one per repetition and fold) would use the mean of the 15 decision values. The
+   spec text read so far ([exp:E7]) says only "frozen models of E1, no retraining".
+
 ## Acceptance evidence
 - Full suite with worktree src: 332 passed, 3 skipped (331 passed + the one fixed test, re-run alone: test_item_comparators +
   test_poc_e0b 17 passed). The 3 skips need absent E-DAIC labels (expected). One failure found by the full run
@@ -98,9 +106,8 @@ Inputs E6 and E7 need that are STILL NOT persisted or not available:
 - E6: response texts per segment and the NLI relevance matrix S_b (new pass, checkpoint and templates to pre-register); the
   loader gives no segment text. The deletion-pass, LiftSem (Ec. 49-60, 108-110) and Ec. 55 code do not exist yet
   (inference needs only the stored models and the bags, which Store.load provides).
-- E7: the spec says "trained on the Wizard-of-Oz training subjects only ... frozen models of E1" but no model refit on all
-  141 subjects exists (E1 trains per outer fold only). Either E7 ensembles the 45 fold models per arm (persisted, each
-  with its own front end) or a refit-on-all job is needed: operator decision. Also absent: features and bags of the 56
+- E7: no model refit on all 141 subjects exists (E1 trains per outer fold only); RESOLVED by operator decision 6: E7 reads
+  the ensemble of the 45 persisted fold models per arm. Still absent: features and bags of the 56
   test sessions and 30 agent-led sessions, the prompt reconstruction, the Ec. 111 thresholds and the hand transcriptions.
 
 U4b status: the gap 1 above is CLOSED for e2e5-real once it runs: 7 arm aliases + svm_x. Extra units vs the first e2e5
@@ -118,7 +125,7 @@ Neural *_x units carry no attention extras unless the model is a surrogate (prom
 6. LiftSem^S (needs E6 deletion influence), the E3 edge-attention panel and the E5 stacked bars are not implemented.
 7. E3 (a) no-graph arm is r06_8 (no Al/RMS: n/a).
 8. Ec. 91 null columns only for full and prompt_only (spec runs the null only for prompt-only).
-9. Delivery strategy ask-on-risk; the forecast exceeds 400 changed lines (about 1900 added over 7 commits); the branch is one stack on feat/edaic-e1-v07.
+9. RESOLVED (decision 5): single-pr, size exception accepted; one stack on feat/edaic-e1-v07.
 
 ## Honest TDD notes
 gen_jobs.py and e2e5_stats.py were written before their tests (stats tests passed without a mutation check); layout tests
