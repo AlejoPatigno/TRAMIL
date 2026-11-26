@@ -19,10 +19,12 @@ units to an explicit id list or to a shard "i/n" (1-based, units[i-1::n]). dispa
 CLI: python -m TRAMIL.e1v07_run {search,real,perm,report} [--out DIR] [--input ROOT] [--shard i/n]
      [--units id,id] [--workers N] [--limit-bags N] [--max-epochs N] [--r-pi N]."""
 import argparse
+import fnmatch
 import json
 import os
 import shutil
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +46,7 @@ __provenance__ = {
         "a_real_unit_never_reads_its_outer_test_subjects_for_fitting",
         "kernel_output_wavlm_cache_is_discovered_below_the_input_root",
         "sharded_search_kernels_feed_a_real_kernel_through_mounted_outputs",
+        "a_real_run_zips_its_units_after_a_verified_zip_and_import_reads_zips_and_loose_json",
     ],
 }
 
@@ -445,26 +448,111 @@ def _input_roots(input_root=None):
     return roots or ["TRAMIL/Data"]
 
 
-def import_upstream(roots, out):
-    """Copy earlier kernels' unit results (every E1_v07/{search,hpo,real,perm}/*.json found below the roots) into out;
-    an existing file is never overwritten. Returns the number of files copied."""
-    out, n = Path(out), 0
+NAME = "E1_v07"  # the folder name results live under, and the prefix of the zips
+
+
+def _shard_tag(shard):
+    return "" if not shard else "_s{}of{}".format(*str(shard).split("/"))
+
+
+def _members(zf, subs):
+    """(member, sub, file name) of every unit JSON member <name>/<sub>/<file>.json; anything else is ignored."""
+    for m in zf.namelist():
+        parts = m.split("/")
+        if len(parts) >= 2 and parts[-2] in subs and parts[-1].endswith(".json") and ".." not in parts:
+            yield m, parts[-2], parts[-1]
+
+
+def _extract(zpath, out, subs):
+    """Unit JSONs of one zip that out does not hold yet; returns the files written."""
+    got = []
+    with zipfile.ZipFile(zpath) as zf:
+        for m, sub, fn in _members(zf, subs):
+            dst = out / sub / fn
+            if not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(zf.read(m))
+                got.append(dst)
+    return got
+
+
+def unpack_own_zips(out, name=NAME, subs=RESULT_DIRS):
+    """Resume: the zips this job wrote earlier in out give their units back as loose files (never overwriting)."""
+    return sum(len(_extract(z, Path(out), subs)) for z in sorted(Path(out).glob(f"{name}*.zip")))
+
+
+def import_upstream_files(roots, out, name=NAME, subs=RESULT_DIRS):
+    """Earlier kernels' unit results below the roots, copied into out: loose <name>/{subs}/*.json and every member of
+    <name>*.zip found anywhere (os.walk, whatever the mount layout). An existing file is never overwritten. Returns the
+    files written."""
+    out, got = Path(out), []
     for root in map(Path, roots):
         if not root.is_dir():
             continue
-        for here, dirs, _ in os.walk(root):
+        for here, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if not d.startswith(("instances_audio", "src", "."))]
-            if Path(here).name != "E1_v07" or Path(here).resolve() == out.resolve():
+            here = Path(here)
+            if here.resolve() == out.resolve():
+                dirs[:] = []
                 continue
-            for sub in RESULT_DIRS:
-                for f in sorted((Path(here) / sub).glob("*.json")):
-                    dst = out / sub / f.name
-                    if not dst.exists():
-                        dst.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy(f, dst)
-                        n += 1
-            dirs[:] = []
-    return n
+            for z in sorted(f for f in files if fnmatch.fnmatch(f, f"{name}*.zip")):
+                got += _extract(here / z, out, subs)
+            if here.name == name:
+                for sub in subs:
+                    for f in sorted((here / sub).glob("*.json")):
+                        dst = out / sub / f.name
+                        if not dst.exists():
+                            dst.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy(f, dst)
+                            got.append(dst)
+                dirs[:] = []
+    return got
+
+
+def import_upstream(roots, out, name=NAME, subs=RESULT_DIRS):
+    """Number of files import_upstream_files copied."""
+    return len(import_upstream_files(roots, out, name, subs))
+
+
+def zip_outputs(out, phases, shard=None, exclude=(), name=NAME):
+    """One zip <name>_<phase>[_s<i>of<n>].zip per phase (not the report) holding every loose unit JSON of out/<phase> as
+    <name>/<phase>/<file>.json, plus out/hpo/*.json in a search zip. Written under a .part name, verified (testzip and
+    member count), renamed, and only then are the loose unit JSONs deleted (hpo stays loose). Units already inside an
+    earlier zip of the same name are kept. `exclude` lists imported files that are not this job's own."""
+    out, zips = Path(out), []
+    skip = {Path(p).resolve() for p in exclude}
+    for ph in [p for p in phases if p != "report"]:
+        loose = {(ph, f.name): f for f in sorted((out / ph).glob("*.json")) if f.resolve() not in skip}
+        if ph == "search":
+            loose |= {("hpo", f.name): f for f in sorted((out / "hpo").glob("*.json")) if f.resolve() not in skip}
+        if not loose:
+            continue
+        final = out / f"{name}_{ph}{_shard_tag(shard)}.zip"
+        part = Path(str(final) + ".part")
+        old = {}
+        if final.exists():
+            with zipfile.ZipFile(final) as zf:
+                old = {(sub, fn): zf.read(m) for m, sub, fn in _members(zf, (ph, "hpo"))}
+        try:
+            with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as zf:
+                for (sub, fn), data in old.items():
+                    if (sub, fn) not in loose:
+                        zf.writestr(f"{name}/{sub}/{fn}", data)
+                for (sub, fn), f in loose.items():
+                    zf.write(f, f"{name}/{sub}/{fn}")
+            want = len(set(old) | set(loose))
+            with zipfile.ZipFile(part) as zf:
+                bad = zf.testzip()
+                if bad is not None or len(zf.namelist()) != want:
+                    raise RuntimeError(f"zip verification failed ({bad!r}, {len(zf.namelist())} of {want} members)")
+            os.replace(part, final)
+        finally:
+            part.unlink(missing_ok=True)
+        for (sub, _), f in loose.items():
+            if sub != "hpo":
+                f.unlink()
+        zips.append(final)
+    return zips
 
 
 def load_data(input_root=None, limit_bags=None):
@@ -489,18 +577,27 @@ def _default_out():
 def run(phases, out_dir=None, input_root=None, shard=None, units=None, workers=1, limit_bags=None,
         import_from_inputs=True, **cfg):
     """Remote callable (run-config.json): phases is one phase or a list run in order (a smoke chains them at a tiny
-    scale). Earlier kernels' results mounted under the input roots are imported first; shard.json under the runner."""
+    scale). Earlier kernels' results mounted under the input roots (loose or zipped) are imported first; shard.json
+    under the runner. A real run (no limit_bags) ends by zipping its unit results (zip_outputs) and dropping the loose
+    copies of the imported ones; a smoke keeps everything loose."""
     from . import e1_run
 
     phases = [phases] if isinstance(phases, str) else list(phases)
     out = Path(out_dir) if out_dir else _default_out()
     out.mkdir(parents=True, exist_ok=True)
-    imported = import_upstream(_input_roots(input_root), out) if import_from_inputs else 0
+    unpack_own_zips(out)
+    got = import_upstream_files(_input_roots(input_root), out) if import_from_inputs else []
+    imported = len(got)
     data, info = load_data(input_root, limit_bags)
     summary = {"imported": imported, "workers": workers, "shard": shard, **info}
     for ph in phases:
         res = run_phase(ph, data, out, workers=workers, shard=shard, only=units, **cfg)
         summary[ph] = {"ran": len(res["ran"]), "skipped": res.get("skipped", 0)}
+    if limit_bags is None:
+        summary["zips"] = [z.name for z in zip_outputs(out, phases, shard, exclude=got)]
+        for f in got:
+            if f.parent.name != "hpo":
+                f.unlink(missing_ok=True)
     e1_run._stamp(summary)
     return summary
 
