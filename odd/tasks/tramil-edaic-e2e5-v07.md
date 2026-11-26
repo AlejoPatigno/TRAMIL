@@ -36,14 +36,14 @@ in use (real/perm/report at ebf6647) are not regenerated.
 - Separate module `e2e5_run.py` so E1 behavior and tests are untouched; zip/import helpers are shared.
 
 ## Checklist
-- [ ] U1 One zip of outputs per job (e1v07_run)
-  - [ ] U1.1 write zip E1_v07_<phase>[_<shard>].zip at the end of a real run (temp name, testzip + count, rename, then delete loose units)
-  - [ ] U1.2 smoke evidence stays loose
-  - [ ] U1.3 import_upstream reads zips (os.walk) + loose JSON, never overwrites
-- [ ] U2 Jobs from other Kaggle accounts
-  - [ ] U2.1 find_inputs/import_upstream layout-agnostic (kernel-output and dataset layouts)
-  - [ ] U2.2 tools/kaggle/gen_jobs.py (owner + inputs mode kernel|dataset)
-  - [ ] U2.3 tools/kaggle/MULTI_ACCOUNT.md
+- [x] U1 One zip of outputs per job (e1v07_run)
+  - [x] U1.1 write zip E1_v07_<phase>[_<shard>].zip at the end of a real run (temp name, testzip + count, rename, then delete loose units)
+  - [x] U1.2 smoke evidence stays loose
+  - [x] U1.3 import_upstream reads zips (os.walk) + loose JSON, never overwrites
+- [x] U2 Jobs from other Kaggle accounts
+  - [x] U2.1 find_inputs/import_upstream layout-agnostic (kernel-output and dataset layouts)
+  - [x] U2.2 tools/kaggle/gen_jobs.py (owner + inputs mode kernel|dataset)
+  - [x] U2.3 tools/kaggle/MULTI_ACCOUNT.md
 - [ ] U3 E2 to E5
   - [ ] U3.1 model flags (graph, free queries, binary head) + extras + batched equivalence/padding tests
   - [ ] U3.2 registry + derangement (quintile) + history removal + permuted_quint
@@ -61,7 +61,12 @@ every new arm, offline job validation fresh, pushed branch.
 (filled during the work)
 
 ## Progress / evidence
-(filled during the work)
+- U1 done, commit 999ba53: tests/test_e1v07_zip.py 6 passed (RED first: 6 failed). Baseline before changes: 240 passed, 3 skipped.
+  Decisions: the zip lives inside the E1_v07 output dir; the search zip also carries hpo (hpo stays loose too); a real run
+  (limit_bags None) zips and deletes the loose copies it imported (except hpo) so upstream units are not republished;
+  resume unpacks own zips first.
+
+- U2 done: tests/test_input_layouts.py 4 passed (kernel, dataset flat/owner/nested; characterization, the os.walk finders already were layout-agnostic, no RED possible), tests/test_gen_jobs.py 3 passed (file written before its test: no RED for the generator). Loose JSON is imported only from a folder named E1_v07/E2E5_v07; zips from anywhere.
 
 ## Next step
-U1.
+U3.
